@@ -1,0 +1,14 @@
+# Copyright 2026 Jeff Koftinoff <jeff.koftinoff@statusbar.com>
+# SPDX-License-Identifier: MIT
+
+target_sources(
+  statusbar-crypto PRIVATE ${CMAKE_CURRENT_LIST_DIR}/aes128_siv.cpp
+                           ${CMAKE_CURRENT_LIST_DIR}/aes256_siv.cpp)
+
+add_crypto_fuzzer(${CMAKE_CURRENT_LIST_DIR}/aes128_siv_fuzzer.cpp)
+add_crypto_fuzzer(${CMAKE_CURRENT_LIST_DIR}/aes_siv_fuzzer.cpp)
+
+set_property(
+  GLOBAL APPEND
+  PROPERTY STATUSBAR_TEST_FILES ${CMAKE_CURRENT_LIST_DIR}/aes128_siv_test.cpp
+           ${CMAKE_CURRENT_LIST_DIR}/aes256_siv_test.cpp)
