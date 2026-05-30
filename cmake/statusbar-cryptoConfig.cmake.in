@@ -1,0 +1,10 @@
+# Copyright 2026 Jeff Koftinoff <jeff.koftinoff@statusbar.com>
+#
+# Generated CMake package config for statusbar-crypto.
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(statusbar-core)
+
+include("${CMAKE_CURRENT_LIST_DIR}/statusbar-cryptoTargets.cmake")
+check_required_components(statusbar-crypto)
