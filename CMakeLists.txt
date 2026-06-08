@@ -186,9 +186,11 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
   set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
       "python3, python3-cryptography (>= 43.0), python3-pycryptodome (>= 3.20)")
   # -dev pulls its own runtime so its cmake config's IMPORTED targets resolve.
+  # >= (not =) so an auto-incremented Debian revision (1.1.0-<rev>) still
+  # satisfies the cross-dependencies.
   set(CPACK_DEBIAN_DEVEL_PACKAGE_DEPENDS
-      "statusbar-crypto (= 1.1.0), statusbar-core-dev (= 1.1.0)")
-  set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "statusbar-core-devel = 1.1.0")
+      "statusbar-crypto (>= 1.1.0), statusbar-core-dev (>= 1.1.0)")
+  set(CPACK_RPM_DEVEL_PACKAGE_REQUIRES "statusbar-core-devel >= 1.1.0")
   set(CPACK_COMPONENT_DEVEL_DESCRIPTION
       "C++ headers, static libraries and CMake package config")
   set(CPACK_GENERATOR "TGZ;ZIP")
