@@ -84,17 +84,6 @@ void sha256_compress_hw(std::array<uint32_t, 8>& state, span<uint8_t const, sha2
     ABEF_SAVE = STATE0;
     CDGH_SAVE = STATE1;
 
-    auto do_4_rounds = [&](int round, __m128i& msg, __m128i msg_prev, __m128i msg_prev2) {
-        MSG = _mm_add_epi32(msg, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[round])));
-        STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
-        MSG = _mm_shuffle_epi32(MSG, 0x0E);
-        STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);
-        if (round < 48) {
-            msg = _mm_sha256msg1_epu32(msg, msg_prev);
-        }
-        (void)msg_prev2;
-    };
-
     // Load message words (big-endian byte swap)
     __m128i MASK = _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
     MSG0 = _mm_shuffle_epi8(_mm_loadu_si128(reinterpret_cast<__m128i const*>(block.data())), MASK);
@@ -107,44 +96,50 @@ void sha256_compress_hw(std::array<uint32_t, 8>& state, span<uint8_t const, sha2
     STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
     MSG = _mm_shuffle_epi32(MSG, 0x0E);
     STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);
-    MSG0 = _mm_sha256msg1_epu32(MSG0, MSG1);
 
     // Rounds 4-7
     MSG = _mm_add_epi32(MSG1, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[4])));
     STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
     MSG = _mm_shuffle_epi32(MSG, 0x0E);
     STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);
-    MSG1 = _mm_sha256msg1_epu32(MSG1, MSG2);
+    MSG0 = _mm_sha256msg1_epu32(MSG0, MSG1);
 
     // Rounds 8-11
     MSG = _mm_add_epi32(MSG2, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[8])));
     STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
     MSG = _mm_shuffle_epi32(MSG, 0x0E);
     STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);
-    MSG2 = _mm_sha256msg1_epu32(MSG2, MSG3);
+    MSG1 = _mm_sha256msg1_epu32(MSG1, MSG2);
 
-    // Rounds 12-15
+    // Rounds 12-15. The alignr below must read MSG2 while it still holds the
+    // original message words W8..11, so the MSG2 msg1 update is issued *after* it.
+    MSG = _mm_add_epi32(MSG3, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[12])));
+    STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
     TMP = _mm_alignr_epi8(MSG3, MSG2, 4);
     MSG0 = _mm_add_epi32(MSG0, TMP);
     MSG0 = _mm_sha256msg2_epu32(MSG0, MSG3);
-    MSG = _mm_add_epi32(MSG3, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[12])));
-    STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);
     MSG = _mm_shuffle_epi32(MSG, 0x0E);
     STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);
-    MSG3 = _mm_sha256msg1_epu32(MSG3, MSG0);
+    MSG2 = _mm_sha256msg1_epu32(MSG2, MSG3);
 
-// Rounds 16-19 through 60-63 follow the same pattern:
-// MSG_next = MSG2(MSG_prev + alignr(MSG_n, MSG_n-1, 4), MSG_n)
+// Rounds 16-63 follow the same rotating pattern. Each group: rnds2 consumes the
+// already-finalized schedule words m0; msg2 finalizes m1 (adds the W[t-7] term
+// via alignr(m0, m3, 4) then sigma1), needed through the group that produces
+// W60..63 (r < 60); msg1 seeds m3 (sigma0 + W[t-16]) for a later msg2, needed
+// only while future words remain (r < 52). msg1 on m3 runs *after* the alignr
+// that reads m3, so the schedule words are still the originals when consumed.
 #    define SHA256_4ROUNDS(r, m0, m1, m2, m3)                                                                                      \
-        TMP = _mm_alignr_epi8(m0, m3, 4);                                                                                          \
-        m1 = _mm_add_epi32(m1, TMP);                                                                                               \
-        m1 = _mm_sha256msg2_epu32(m1, m0);                                                                                         \
         MSG = _mm_add_epi32(m0, _mm_loadu_si128(reinterpret_cast<__m128i const*>(&K[r])));                                         \
         STATE1 = _mm_sha256rnds2_epu32(STATE1, STATE0, MSG);                                                                       \
+        if ((r) < 60) {                                                                                                            \
+            TMP = _mm_alignr_epi8(m0, m3, 4);                                                                                      \
+            m1 = _mm_add_epi32(m1, TMP);                                                                                           \
+            m1 = _mm_sha256msg2_epu32(m1, m0);                                                                                     \
+        }                                                                                                                          \
         MSG = _mm_shuffle_epi32(MSG, 0x0E);                                                                                        \
         STATE0 = _mm_sha256rnds2_epu32(STATE0, STATE1, MSG);                                                                       \
-        if ((r) < 48) {                                                                                                            \
-            m0 = _mm_sha256msg1_epu32(m0, m1);                                                                                     \
+        if ((r) < 52) {                                                                                                            \
+            m3 = _mm_sha256msg1_epu32(m3, m0);                                                                                     \
         }
 
     SHA256_4ROUNDS(16, MSG0, MSG1, MSG2, MSG3)
