@@ -8,6 +8,7 @@
 #if STATUSBAR_CRYPTO_HAS_INT128
 
 #    include "statusbar/crypto/p256/p256.hpp"
+#    include "statusbar/crypto/p256/p256_wire_constants.hpp"
 #    include "statusbar/crypto/util/crypto_util_internal.hpp"
 #    include "statusbar/test/test.hpp"
 
@@ -240,6 +241,43 @@ TEST(p256, point_encoding_x)
     EXPECT_TRUE(decoded.has_value());
     EXPECT_TRUE(p256_fe_equal(G.x, decoded->x));
     EXPECT_TRUE(p256_point_on_curve(*decoded));
+}
+
+TEST(p256, decode_rejects_noncanonical_coordinate)
+{
+    // Uncompressed: a coordinate >= p must be rejected as non-canonical
+    // (SEC 1 §2.3.6). p256_fe_from_bytes does not reduce, so without the
+    // check a value in [p, 2^256) is accepted as its reduced representative.
+    auto G = p256_generator();
+    auto enc = p256_encode_point_uncompressed(G);
+    EXPECT_TRUE(p256_decode_point_uncompressed(enc).has_value());  // canonical still ok
+
+    auto enc_bad_x = enc;
+    for (size_t i = 0; i < 32; ++i) {
+        enc_bad_x[i] = p256_field_prime_bytes[i];  // x := p
+    }
+    EXPECT_TRUE(!p256_decode_point_uncompressed(enc_bad_x).has_value());
+
+    auto enc_bad_y = enc;
+    for (size_t i = 0; i < 32; ++i) {
+        enc_bad_y[32 + i] = p256_field_prime_bytes[i];  // y := p
+    }
+    EXPECT_TRUE(!p256_decode_point_uncompressed(enc_bad_y).has_value());
+
+    // Compressed: x = p is a non-canonical encoding of 0. If x = 0 is on the
+    // curve, the old code reduced x mod p before the on-curve test and would
+    // accept this; the canonical check must reject it (isolates the fix).
+    std::array<uint8_t, p256_compressed_point_size> comp_zero{};
+    comp_zero[0] = 0x01;  // x = 0
+    std::array<uint8_t, p256_compressed_point_size> comp_prime{};
+    comp_prime[0] = 0x01;
+    for (size_t i = 0; i < 32; ++i) {
+        comp_prime[1 + i] = p256_field_prime_bytes[i];  // x := p ≡ 0 (mod p)
+    }
+    if (p256_decode_point_x(comp_zero).has_value()) {
+        EXPECT_TRUE(!p256_decode_point_x(comp_prime).has_value());
+    }
+    EXPECT_TRUE(!p256_decode_point_x(comp_prime).has_value());
 }
 
 TEST(p256, point_neg)

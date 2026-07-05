@@ -13,6 +13,7 @@
 
 #include "statusbar/crypto/p256/p256_jac32.hpp"
 
+#include "statusbar/crypto/p256/p256_wire_constants.hpp"
 #include "statusbar/crypto/util/crypto_has_int128.hpp"
 
 #if STATUSBAR_CRYPTO_HAS_INT128
@@ -180,6 +181,36 @@ TEST(p256_jac32, id_encode_decode)
             EXPECT_TRUE(p256_fe32_equal(c->x, a.x));  // x recovered; y sign is free
         }
     }
+}
+
+TEST(p256_jac32, decode_rejects_noncanonical_coordinate)
+{
+    // A coordinate >= p must be rejected as non-canonical (SEC 1 §2.3.6);
+    // p256_fe32_from_bytes does not reduce.
+    auto const g = p256x32_generator();
+    auto enc = p256x32_encode_point_uncompressed(g);
+    EXPECT_TRUE(p256x32_decode_point_uncompressed(std::span<uint8_t const, 64>(enc)).has_value());
+
+    auto enc_bad = enc;
+    for (size_t i = 0; i < 32; ++i) {
+        enc_bad[i] = p256_field_prime_bytes[i];  // x := p
+    }
+    EXPECT_TRUE(!p256x32_decode_point_uncompressed(std::span<uint8_t const, 64>(enc_bad)).has_value());
+
+    // Compressed: x = p is a non-canonical encoding of 0. If x = 0 is on the
+    // curve, the old code (reducing x mod p before the on-curve test) would
+    // accept this; the canonical check must reject it.
+    std::array<uint8_t, 33> comp_zero{};
+    comp_zero[0] = 0x01;  // x = 0
+    std::array<uint8_t, 33> comp_prime{};
+    comp_prime[0] = 0x01;
+    for (size_t i = 0; i < 32; ++i) {
+        comp_prime[1 + i] = p256_field_prime_bytes[i];  // x := p ≡ 0 (mod p)
+    }
+    if (p256x32_decode_point_x(std::span<uint8_t const, 33>(comp_zero)).has_value()) {
+        EXPECT_TRUE(!p256x32_decode_point_x(std::span<uint8_t const, 33>(comp_prime)).has_value());
+    }
+    EXPECT_TRUE(!p256x32_decode_point_x(std::span<uint8_t const, 33>(comp_prime)).has_value());
 }
 
 TEST(p256_jac32, id_double_scalar_mult)
