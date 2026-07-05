@@ -209,13 +209,12 @@ auto aes128_gcm_siv_encrypt(
     span<uint8_t> plaintext_to_ciphertext,
     span<uint8_t const> aad) -> std::array<uint8_t, aes_gcm_siv_tag_size>
 {
-    // RFC 8452: combined AAD + plaintext must not exceed 2^36 bits (2^33 bytes)
-    if (static_cast<uint64_t>(aad.size()) + static_cast<uint64_t>(plaintext_to_ciphertext.size()) >
-        (static_cast<uint64_t>(1) << 33)) {
+    // RFC 8452 §6: AAD and plaintext are each limited to 2^36 bytes.
+    if (static_cast<uint64_t>(aad.size()) > (static_cast<uint64_t>(1) << 36)) {
         return {};
     }
-
-    // Reject inputs that would wrap the 32-bit CTR counter (2^32 blocks * 16 bytes)
+    // Plaintext bound (2^36 bytes = 2^32 blocks); the 32-bit CTR counter also
+    // caps it, so reject anything that would wrap the counter.
     if (plaintext_to_ciphertext.size() > static_cast<uint64_t>(0xFFFFFFFF) * 16) {
         return {};
     }
@@ -247,13 +246,12 @@ auto aes128_gcm_siv_decrypt(
     span<uint8_t const, aes_gcm_siv_tag_size> tag,
     span<uint8_t const> aad) -> bool
 {
-    // RFC 8452: combined AAD + ciphertext must not exceed 2^36 bits (2^33 bytes)
-    if (static_cast<uint64_t>(aad.size()) + static_cast<uint64_t>(ciphertext_to_plaintext.size()) >
-        (static_cast<uint64_t>(1) << 33)) {
+    // RFC 8452 §6: AAD and ciphertext are each limited to 2^36 bytes.
+    if (static_cast<uint64_t>(aad.size()) > (static_cast<uint64_t>(1) << 36)) {
         return false;
     }
-
-    // Reject inputs that would wrap the 32-bit CTR counter (2^32 blocks * 16 bytes)
+    // Ciphertext bound (2^36 bytes = 2^32 blocks); the 32-bit CTR counter also
+    // caps it, so reject anything that would wrap the counter.
     if (ciphertext_to_plaintext.size() > static_cast<uint64_t>(0xFFFFFFFF) * 16) {
         return false;
     }
