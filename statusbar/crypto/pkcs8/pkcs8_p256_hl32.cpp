@@ -63,7 +63,8 @@ auto spki_import_p256(span<uint8_t const> der) -> std::optional<P256PublicKey>
     }
     ++pos;
     auto seq_len = der_read_length(der, pos);
-    if (seq_len == SIZE_MAX || pos + seq_len > der.size()) {
+    // The outer SEQUENCE must span the entire buffer exactly — no trailing data.
+    if (seq_len == SIZE_MAX || pos + seq_len != der.size()) {
         return std::nullopt;
     }
 
@@ -96,7 +97,9 @@ auto spki_import_p256(span<uint8_t const> der) -> std::optional<P256PublicKey>
     pos += 2;
 
     // Extract x || y (64 bytes)
-    if (pos + 64 > der.size()) {
+    // The point is the final element, ending exactly at the buffer end
+    // (rejects trailing data inside the SEQUENCE).
+    if (pos + 64 != der.size()) {
         return std::nullopt;
     }
 
@@ -142,7 +145,8 @@ auto pkcs8_import_p256(span<uint8_t const> der) -> std::optional<P256PrivateKey>
     }
     ++pos;
     auto outer_len = der_read_length(der, pos);
-    if (outer_len == SIZE_MAX || pos + outer_len > der.size()) {
+    // The outer SEQUENCE must span the entire buffer exactly — no trailing data.
+    if (outer_len == SIZE_MAX || pos + outer_len != der.size()) {
         return std::nullopt;
     }
 

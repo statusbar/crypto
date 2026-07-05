@@ -475,6 +475,71 @@ TEST(pkcs8, der_read_length_errors)
         EXPECT_TRUE(len == 256);
         EXPECT_TRUE(pos == 3);
     }
+
+    // Non-minimal: long form for a value that fits the short form (< 0x80).
+    {
+        uint8_t buf[] = {0x81, 0x05};  // 5 must be encoded as 0x05
+        size_t pos = 0;
+        EXPECT_TRUE(der_read_length(span<uint8_t const>(buf, 2), pos) == SIZE_MAX);
+    }
+    {
+        uint8_t buf[] = {0x81, 0x7F};  // 127 must be encoded as 0x7F
+        size_t pos = 0;
+        EXPECT_TRUE(der_read_length(span<uint8_t const>(buf, 2), pos) == SIZE_MAX);
+    }
+
+    // Non-minimal: leading zero byte in the long form.
+    {
+        uint8_t buf[] = {0x82, 0x00, 0xFF};  // 255 must be encoded as 0x81 0xFF
+        size_t pos = 0;
+        EXPECT_TRUE(der_read_length(span<uint8_t const>(buf, 3), pos) == SIZE_MAX);
+    }
+
+    // Boundary: 0x80 exactly is the smallest value requiring the long form.
+    {
+        uint8_t buf[] = {0x81, 0x80};
+        size_t pos = 0;
+        EXPECT_TRUE(der_read_length(span<uint8_t const>(buf, 2), pos) == 0x80);
+    }
+}
+
+TEST(pkcs8, import_rejects_trailing_data)
+{
+    // A valid export with any bytes appended must be rejected: the outer
+    // SEQUENCE no longer spans the whole buffer.
+    std::array<uint8_t, 32> seed{};
+    for (size_t i = 0; i < seed.size(); ++i) {
+        seed[i] = static_cast<uint8_t>(i);
+    }
+    auto ed_sk = ed25519_keypair_from_seed(seed);
+
+    // Ed25519 PKCS#8 + trailing byte.
+    {
+        auto der = pkcs8_export_ed25519(seed);
+        std::vector<uint8_t> buf(der.begin(), der.end());
+        EXPECT_TRUE(pkcs8_import_ed25519(span<uint8_t const>(buf.data(), buf.size())).has_value());
+        buf.push_back(0x00);
+        EXPECT_FALSE(pkcs8_import_ed25519(span<uint8_t const>(buf.data(), buf.size())).has_value());
+    }
+
+    // Ed25519 SPKI + trailing byte.
+    {
+        auto der = spki_export_ed25519(ed_sk.public_key);
+        std::vector<uint8_t> buf(der.begin(), der.end());
+        EXPECT_TRUE(spki_import_ed25519(span<uint8_t const>(buf.data(), buf.size())).has_value());
+        buf.push_back(0x42);
+        EXPECT_FALSE(spki_import_ed25519(span<uint8_t const>(buf.data(), buf.size())).has_value());
+    }
+
+    // P-256 SPKI + trailing byte.
+    {
+        auto p256_sk = p256_ecdsa_keypair_from_seed(seed);
+        auto der = spki_export_p256(p256_sk.public_key);
+        std::vector<uint8_t> buf(der.begin(), der.end());
+        EXPECT_TRUE(spki_import_p256(span<uint8_t const>(buf.data(), buf.size())).has_value());
+        buf.push_back(0x99);
+        EXPECT_FALSE(spki_import_p256(span<uint8_t const>(buf.data(), buf.size())).has_value());
+    }
 }
 
 //

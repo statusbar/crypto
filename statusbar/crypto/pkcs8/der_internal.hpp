@@ -31,9 +31,16 @@ inline auto der_read_length(std::span<uint8_t const> data, size_t& pos) -> size_
     if (is_invalid_der_length_header(n, pos, data.size())) {
         return SIZE_MAX;
     }
+    size_t const first_len_byte = data[pos];
     size_t len = 0;
     for (size_t i = 0; i < n; ++i) {
         len = (len << 8) | data[pos++];
+    }
+    // DER requires the minimal length encoding (unlike BER): the long form is
+    // only permitted for len >= 0x80, and must carry no leading zero byte.
+    // Reject 0x81 0x05 (fits short form) and 0x82 0x00 0x05 (leading zero).
+    if (len < 0x80 || first_len_byte == 0x00) {
+        return SIZE_MAX;
     }
     return len;
 }
