@@ -57,7 +57,8 @@ auto spki_import_ed25519(span<uint8_t const> der) -> std::optional<Ed25519Public
     }
     ++pos;
     auto seq_len = der_read_length(der, pos);
-    if (seq_len == SIZE_MAX || pos + seq_len > der.size()) {
+    // The outer SEQUENCE must span the entire buffer exactly — no trailing data.
+    if (seq_len == SIZE_MAX || pos + seq_len != der.size()) {
         return std::nullopt;
     }
 
@@ -89,8 +90,9 @@ auto spki_import_ed25519(span<uint8_t const> der) -> std::optional<Ed25519Public
     }
     ++pos;
 
-    // Extract 32-byte public key
-    if (pos + 32 > der.size()) {
+    // Extract 32-byte public key — it is the final element, ending exactly at
+    // the buffer end (rejects trailing data inside the SEQUENCE).
+    if (pos + 32 != der.size()) {
         return std::nullopt;
     }
 
@@ -130,7 +132,8 @@ auto pkcs8_import_ed25519(span<uint8_t const> der) -> std::optional<Ed25519Priva
     }
     ++pos;
     auto outer_len = der_read_length(der, pos);
-    if (outer_len == SIZE_MAX || pos + outer_len > der.size()) {
+    // The outer SEQUENCE must span the entire buffer exactly — no trailing data.
+    if (outer_len == SIZE_MAX || pos + outer_len != der.size()) {
         return std::nullopt;
     }
 
@@ -165,6 +168,10 @@ auto pkcs8_import_ed25519(span<uint8_t const> der) -> std::optional<Ed25519Priva
     }
     ++pos;
     auto seed_len = der_read_length(der, pos);
+    // Bounds check only: an optional [1] publicKey (RFC 8410) may legitimately
+    // follow the private key, so the seed is not required to be the last
+    // element. Trailing data after the whole structure is already rejected by
+    // the outer-SEQUENCE-spans-buffer check above.
     if (seed_len != 32 || pos + 32 > der.size()) {
         return std::nullopt;
     }
