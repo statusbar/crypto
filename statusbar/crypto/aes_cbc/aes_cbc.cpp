@@ -116,11 +116,14 @@ auto aes256_cbc_iv0_decrypt(Aes256Key const& key, span<uint8_t const> ciphertext
         // Constant-time: is this a padding position? (i < pad_val)
         // In uint16_t: if i < pad_val, (i - pad_val) has high bit set
         uint16_t const diff = static_cast<uint16_t>(i) - static_cast<uint16_t>(pad_val);
-        uint8_t const is_padding = static_cast<uint8_t>(diff >> 15);  // 1 if i < pad_val
+        // Full-width mask (0x00 or 0xFF), not a single bit: a 1-bit value would
+        // only compare bit 0 of `mismatch` and silently accept padding bytes
+        // that differ in bits 1..7.
+        uint8_t const pad_mask = static_cast<uint8_t>(0u - static_cast<unsigned>(diff >> 15));  // 0xFF if i < pad_val
         // Constant-time: does byte_val match pad_val?
         uint8_t const mismatch = byte_val ^ pad_val;
         // Accumulate error: bad if this is a padding byte that doesn't match
-        bad |= static_cast<uint8_t>(is_padding) & mismatch;
+        bad |= pad_mask & mismatch;
     }
 
     // Return plaintext length or 0 in constant time (no branch on secret-derived 'bad').

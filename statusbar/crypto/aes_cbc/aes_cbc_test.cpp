@@ -117,6 +117,41 @@ TEST(aes_cbc, invalid_ciphertext)
     EXPECT_TRUE(dec_result2.empty());
 }
 
+// Regression: padding verification must reject a padding byte that differs
+// from pad_val in a HIGH bit, not only in bit 0. A one-block plaintext pads to
+// a full 0x10 block; flipping bit 4 of ciphertext block 0 flips bit 4 of the
+// decrypted block-1 padding byte at the same offset (CBC malleability),
+// turning a 0x10 padding byte into 0x00 while leaving pad_val (the last byte)
+// intact. The old bit-0-only mask accepted this; correct verification rejects.
+TEST(aes_cbc, rejects_high_bit_corrupted_padding)
+{
+    Aes256Key key{};
+    for (int i = 0; i < 32; ++i) {
+        key.data[static_cast<size_t>(i)] = static_cast<uint8_t>(i * 3 + 1);
+    }
+
+    std::array<uint8_t, 16> plaintext{};
+    for (size_t i = 0; i < plaintext.size(); ++i) {
+        plaintext[i] = static_cast<uint8_t>(0xA0 + i);
+    }
+
+    std::array<uint8_t, 32> ciphertext{};  // 16 data + 16 pad(0x10) block
+    std::array<uint8_t, 32> decrypted{};
+    aes256_cbc_iv0_encrypt(key, plaintext, ciphertext);
+
+    // Sanity: unmodified ciphertext round-trips.
+    auto ok = aes256_cbc_iv0_decrypt(key, ciphertext, decrypted);
+    EXPECT_TRUE(ok.size() == 16);
+
+    // Flip bit 4 of ciphertext[5] (block 0) -> flips bit 4 of padding byte 5
+    // of the decrypted block-1 padding (0x10 -> 0x00). Last byte (pad_val)
+    // untouched, so the [1,16] range check still passes; only the per-byte
+    // content check can catch it.
+    ciphertext[5] ^= 0x10;
+    auto bad = aes256_cbc_iv0_decrypt(key, ciphertext, decrypted);
+    EXPECT_TRUE(bad.empty());
+}
+
 TEST(aes_cbc, encrypt_buffer_validation)
 {
     Aes256Key key{};
