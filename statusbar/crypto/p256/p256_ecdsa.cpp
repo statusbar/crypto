@@ -117,13 +117,22 @@ static auto rfc6979_generate_k(span<uint8_t const, p256_scalar_size> privkey_byt
     span_fill(V, uint8_t{0x01});
     span_fill(K, uint8_t{0x00});
 
-    // Step d: K = HMAC_K(V || 0x00 || x || h1)
+    // RFC 6979 §2.3.4 bits2octets(h1): the DRBG is seeded with the message
+    // hash reduced mod n, not the raw hash. For H(m) < n this is a no-op.
+    SecureArray<32> h1_octets{};
+    {
+        std::array<uint8_t, 2 * p256_scalar_size> wide{};
+        span_copy(span(wide).last<32>(), hash);
+        h1_octets = p256_sc_to_bytes(p256_sc_reduce_wide(wide));
+    }
+
+    // Step d: K = HMAC_K(V || 0x00 || x || bits2octets(h1))
     {
         SecureArray<32 + 1 + 32 + 32> msg{};
         span_copy(span(msg).first<32>(), V);
         msg[32] = 0x00;
         span_copy(span(msg).subspan<33, 32>(), privkey_bytes);
-        span_copy(span(msg).last<32>(), hash);
+        span_copy(span(msg).last<32>(), h1_octets);
         K = sha256_hmac_hw(K, msg);
     }
 
@@ -136,24 +145,31 @@ static auto rfc6979_generate_k(span<uint8_t const, p256_scalar_size> privkey_byt
         span_copy(span(msg).first<32>(), V);
         msg[32] = 0x01;
         span_copy(span(msg).subspan<33, 32>(), privkey_bytes);
-        span_copy(span(msg).last<32>(), hash);
+        span_copy(span(msg).last<32>(), h1_octets);
         K = sha256_hmac_hw(K, msg);
     }
 
     // Step g: V = HMAC_K(V)
     V = sha256_hmac_hw(K, V);
 
-    // Step h: generate k
+    // Step h: generate k by rejection sampling (RFC 6979 §3.2 step h.3).
     for (int attempt = 0; attempt < 100; ++attempt) {
         V = sha256_hmac_hw(K, V);
-        auto k = p256_sc_from_bytes(V);
+        // bits2int(V) == int(V) for P-256 (qlen == hlen == 256). Accept only
+        // when int(V) is in [1, n-1]. p256_sc_from_bytes does NOT reduce, so
+        // the old code's from->to round-trip always matched V and the >= n
+        // branch never ran, realizing k = int(V) mod n — a modulo-biased
+        // nonce. Reduce int(V) mod n and accept only when it is unchanged
+        // (i.e. int(V) was already < n); otherwise reject and re-run the DRBG.
+        std::array<uint8_t, 2 * p256_scalar_size> wide{};
+        span_copy(span(wide).last<32>(), V);
+        auto k = p256_sc_reduce_wide(wide);
         if (!p256_sc_is_zero(k)) {
-            // Check k < n by converting back and comparing
             auto k_bytes = p256_sc_to_bytes(k);
             if (span_compare(V, k_bytes)) {
-                return k;  // k was already < n (from_bytes didn't reduce)
+                return k;  // int(V) < n: in range, accept
             }
-            // k was reduced, meaning original was >= n. Try again.
+            // int(V) >= n: out of range, reject and continue the DRBG.
         }
         // Update K and V for retry
         SecureArray<33> retry_msg{};
