@@ -49,7 +49,9 @@ auto x25519_ecies_encrypt(
     auto const& V = eph_sk.public_key.data;
 
     // Step 3: Compute shared secret Z = X25519(ephemeral_sk, recipient_pk)
-    auto Z = x25519(eph_sk, recipient_pk);
+    // SecureArray so the raw DH secret is wiped from the stack on return
+    // (matches the P-256 ECIES path, where p256_ecdh returns SecureArray).
+    SecureArray<x25519_shared_secret_size> const Z = x25519(eph_sk, recipient_pk);
     if (!x25519_shared_secret_is_valid(Z)) {
         return {};
     }
@@ -116,7 +118,8 @@ auto x25519_ecies_decrypt(X25519PrivateKey const& sk, span<uint8_t const> input,
     span_copy(eph_pk.data, V);
 
     // Step 3: Compute shared secret Z = X25519(sk, ephemeral_pk)
-    auto Z = x25519(sk, eph_pk);
+    // SecureArray so the raw DH secret is wiped from the stack on return.
+    SecureArray<x25519_shared_secret_size> const Z = x25519(sk, eph_pk);
     if (!x25519_shared_secret_is_valid(Z)) {
         return {};
     }
