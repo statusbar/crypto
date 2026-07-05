@@ -187,6 +187,25 @@ TEST(curve25519_fe32, id_sub_and_neg)
     }
 }
 
+// Regression: fe_sub's limb-0 bias was 2p, whose limb 0 is 36 short of the
+// largest double-width subtrahend limb (2^27-2, e.g. from add(X^2, Y^2) in
+// point doubling). A small minuend limb 0 minus such a subtrahend limb
+// underflowed the uint64 and corrupted the result by 2^64 mod p. Build that
+// exact edge directly and verify (a - b) + b == a (mod p).
+TEST(curve25519_fe32, id_sub_wide_subtrahend_no_underflow)
+{
+    Fe25519x32 b{};
+    b.limbs[0] = (1U << 27) - 2;  // 2*(2^26-1): the max double-width even limb
+
+    Fe25519x32 const zero{};
+    EXPECT_TRUE(feq(fe25519x32_add(fe25519x32_sub(zero, b), b), zero));
+
+    Fe25519x32 a{};
+    a.limbs[0] = 7;  // small limb 0 is what triggers the underflow
+    a.limbs[3] = 4242;
+    EXPECT_TRUE(feq(fe25519x32_add(fe25519x32_sub(a, b), b), a));
+}
+
 TEST(curve25519_fe32, id_inverse)
 {
     Rng rng(9);
@@ -276,6 +295,23 @@ TEST(curve25519_fe32, xc_roundtrip)
         auto b = rng.bytes32();
         EXPECT_TRUE(same(fe25519_to_bytes(ref64(b)), fe25519x32_to_bytes(v32(b))));
     }
+}
+
+// Same limb-0 underflow regression as id_sub_wide_subtrahend_no_underflow,
+// for the 5x51 reference backend (bias limb 0 was 2^52-38, short of the
+// double-width max 2^52-2).
+TEST(curve25519_fe32, xc_sub_wide_subtrahend_no_underflow)
+{
+    Fe25519 b{};
+    b.limbs[0] = (1ULL << 52) - 2;  // 2*(2^51-1): the max double-width limb
+
+    Fe25519 const zero{};
+    EXPECT_TRUE(same(fe25519_to_bytes(fe25519_add(fe25519_sub(zero, b), b)), fe25519_to_bytes(zero)));
+
+    Fe25519 a{};
+    a.limbs[0] = 7;
+    a.limbs[2] = 4242;
+    EXPECT_TRUE(same(fe25519_to_bytes(fe25519_add(fe25519_sub(a, b), b)), fe25519_to_bytes(a)));
 }
 
 TEST(curve25519_fe32, xc_add)

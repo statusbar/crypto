@@ -30,21 +30,25 @@ using internal::store_le64;
 constexpr uint64_t M26 = 0x3FFFFFF;  // 2^26 - 1
 constexpr uint64_t M25 = 0x1FFFFFF;  // 2^25 - 1
 
-// 2*p in 10-limb radix-2^25.5 form (2p = 2^256 - 38, congruent to 0 mod p).
+// 4*p in 10-limb radix-2^25.5 form (4p = 2^257 - 76, congruent to 0 mod p).
 // Added as a per-limb bias in subtraction so the difference never underflows.
-// Sized for inputs whose limbs are at most one canonical width (the same
-// contract as fe25519_sub in the 5x51-bit implementation).
-constexpr std::array<uint64_t, 10> FE_2P = {
-    (1ULL << 27) - 38,
-    (1ULL << 26) - 2,
-    (1ULL << 27) - 2,
-    (1ULL << 26) - 2,
-    (1ULL << 27) - 2,
-    (1ULL << 26) - 2,
-    (1ULL << 27) - 2,
-    (1ULL << 26) - 2,
-    (1ULL << 27) - 2,
-    (1ULL << 26) - 2,
+// The subtrahend may be an unreduced add() result — e.g. add(X^2, Y^2) in
+// point doubling — whose limbs reach ~2x the canonical width (even limb up to
+// 2^27-2, odd up to 2^26-2). 2p was 36 short in limb 0 (its value there is
+// only 2^27-38 because the "-38" of 2p = 2^256-38 lands in limb 0), so a small
+// minuend limb 0 minus a large subtrahend limb 0 underflowed the uint64 and
+// corrupted the result by 2^64 mod p. 4p clears every limb with margin.
+constexpr std::array<uint64_t, 10> FE_4P = {
+    (1ULL << 28) - 76,
+    (1ULL << 27) - 4,
+    (1ULL << 28) - 4,
+    (1ULL << 27) - 4,
+    (1ULL << 28) - 4,
+    (1ULL << 27) - 4,
+    (1ULL << 28) - 4,
+    (1ULL << 27) - 4,
+    (1ULL << 28) - 4,
+    (1ULL << 27) - 4,
 };
 
 // Propagate carries through 10 limbs. The carry out of limb 9 wraps into
@@ -123,12 +127,12 @@ auto fe25519x32_add(Fe25519x32 const& a, Fe25519x32 const& b) -> Fe25519x32
     return r;
 }
 
-// Subtraction with a 2*p bias to avoid underflow, then carry propagation.
+// Subtraction with a 4*p bias to avoid underflow, then carry propagation.
 auto fe25519x32_sub(Fe25519x32 const& a, Fe25519x32 const& b) -> Fe25519x32
 {
     uint64_t h[10];
     for (int i = 0; i < 10; ++i) {
-        h[i] = (static_cast<uint64_t>(a.limbs[static_cast<size_t>(i)]) + FE_2P[static_cast<size_t>(i)]) -
+        h[i] = (static_cast<uint64_t>(a.limbs[static_cast<size_t>(i)]) + FE_4P[static_cast<size_t>(i)]) -
             static_cast<uint64_t>(b.limbs[static_cast<size_t>(i)]);
     }
     carry_propagate(h);

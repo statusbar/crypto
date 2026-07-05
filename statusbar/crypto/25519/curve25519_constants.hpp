@@ -39,10 +39,20 @@ inline constexpr std::array<uint8_t, curve25519_point_size> BASE_POINT_COMPRESSE
 // Shared by x25519.cpp (as BASEPOINT_9) and ed25519.cpp (as x25519_basepoint).
 inline constexpr std::array<uint8_t, curve25519_point_size> X25519_BASEPOINT = {9};
 
-// 2*p in 5x51-bit limb form, used as bias in fe25519_sub to prevent underflow.
-// p = 2^255 - 19, so 2p limbs are {2*(2^51-19), 2*(2^51-1), ..., 2*(2^51-1)}.
-inline constexpr Fe25519 FE25519_2P = {
-    {0xFFFFFFFFFFFDAULL, 0xFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFEULL, 0xFFFFFFFFFFFFEULL}};
+// 4*p in 5x51-bit limb form, used as bias in fe25519_sub to prevent underflow.
+// p = 2^255 - 19, so 4p limbs are {4*(2^51-19), 4*(2^51-1), ..., 4*(2^51-1)}.
+// The subtrahend may be an unreduced add() result (e.g. add(X^2, Y^2) in point
+// doubling), whose limbs reach ~2^52; 2p was 36 short in limb 0 (2^52-38) for
+// that case, underflowing the uint64 and corrupting the result by 2^64 mod p,
+// so use 4p, which clears every limb with margin.
+// Written arithmetically (4*(2^51-19), 4*(2^51-1)) to avoid hex-digit slips:
+// limb 0 = 2^53 - 76, limbs 1..4 = 2^53 - 4.
+inline constexpr Fe25519 FE25519_4P = {
+    {4ULL * ((1ULL << 51) - 19),
+     4ULL * ((1ULL << 51) - 1),
+     4ULL * ((1ULL << 51) - 1),
+     4ULL * ((1ULL << 51) - 1),
+     4ULL * ((1ULL << 51) - 1)}};
 
 // Scalar reduction coefficients for mod L arithmetic.
 // L = 2^252 + 27742317777372353535851937790883648493 (Ed25519 group order).

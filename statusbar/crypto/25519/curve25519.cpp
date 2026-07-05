@@ -40,7 +40,7 @@ using internal::Uint128;
 using constants::BASE_POINT_COMPRESSED;
 using constants::ED25519_2D;
 using constants::ED25519_D;
-using constants::FE25519_2P;
+using constants::FE25519_4P;
 using constants::MASK51;
 using constants::SQRT_M1;
 
@@ -108,15 +108,15 @@ auto fe25519_add(Fe25519 const& a, Fe25519 const& b) -> Fe25519
     return h;
 }
 
-// Subtraction with bias: add 2*p first to avoid underflow, then subtract.
+// Subtraction with bias: add 4*p first to avoid underflow, then subtract.
 auto fe25519_sub(Fe25519 const& a, Fe25519 const& b) -> Fe25519
 {
     Fe25519 h;
-    std::get<0>(h.limbs) = (std::get<0>(a.limbs) + std::get<0>(FE25519_2P.limbs)) - std::get<0>(b.limbs);
-    std::get<1>(h.limbs) = (std::get<1>(a.limbs) + std::get<1>(FE25519_2P.limbs)) - std::get<1>(b.limbs);
-    std::get<2>(h.limbs) = (std::get<2>(a.limbs) + std::get<2>(FE25519_2P.limbs)) - std::get<2>(b.limbs);
-    std::get<3>(h.limbs) = (std::get<3>(a.limbs) + std::get<3>(FE25519_2P.limbs)) - std::get<3>(b.limbs);
-    std::get<4>(h.limbs) = (std::get<4>(a.limbs) + std::get<4>(FE25519_2P.limbs)) - std::get<4>(b.limbs);
+    std::get<0>(h.limbs) = (std::get<0>(a.limbs) + std::get<0>(FE25519_4P.limbs)) - std::get<0>(b.limbs);
+    std::get<1>(h.limbs) = (std::get<1>(a.limbs) + std::get<1>(FE25519_4P.limbs)) - std::get<1>(b.limbs);
+    std::get<2>(h.limbs) = (std::get<2>(a.limbs) + std::get<2>(FE25519_4P.limbs)) - std::get<2>(b.limbs);
+    std::get<3>(h.limbs) = (std::get<3>(a.limbs) + std::get<3>(FE25519_4P.limbs)) - std::get<3>(b.limbs);
+    std::get<4>(h.limbs) = (std::get<4>(a.limbs) + std::get<4>(FE25519_4P.limbs)) - std::get<4>(b.limbs);
 
     carry_propagate(h.limbs.data());
     return h;
