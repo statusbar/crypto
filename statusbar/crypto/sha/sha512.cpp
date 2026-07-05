@@ -117,14 +117,24 @@ void sha512_compress(std::array<uint64_t, 8>& state, span<uint8_t const, sha512_
     }
 
     // Step 2: Initialize working variables a..h from current hash state.
+    // Zero them on scope exit (matters when SHA-512 is used as an HMAC/HKDF
+    // PRF over secret keys) — mirrors sha256_compress.
     uint64_t a = state[0];
+    SecureZeroRef const zero_a{a};
     uint64_t b = state[1];
+    SecureZeroRef const zero_b{b};
     uint64_t c = state[2];
+    SecureZeroRef const zero_c{c};
     uint64_t d = state[3];
+    SecureZeroRef const zero_d{d};
     uint64_t e = state[4];
+    SecureZeroRef const zero_e{e};
     uint64_t f = state[5];
+    SecureZeroRef const zero_f{f};
     uint64_t g = state[6];
+    SecureZeroRef const zero_g{g};
     uint64_t h = state[7];
+    SecureZeroRef const zero_h{h};
 
     // Step 3: 80 rounds of the compression function (SHA-512 uses 80 rounds vs. SHA-256's 64).
     // Each round: T1 = h + Sigma1(e) + Ch(e,f,g) + K[t] + W[t]

@@ -51,7 +51,10 @@ auto kdf2_sha256(span<uint8_t const> shared_secret, span<uint8_t const> params, 
         buf.data[counter_offset + 2] = static_cast<uint8_t>(counter >> 8);
         buf.data[counter_offset + 3] = static_cast<uint8_t>(counter);
 
-        auto hash = sha256_hw(span<uint8_t const>(buf.data, buf_size));
+        // SecureArray so the derived digest block is wiped each iteration —
+        // on the final iteration only `to_copy` bytes are emitted but the
+        // whole 32-byte block is key material.
+        SecureArray<32> const hash = sha256_hw(span<uint8_t const>(buf.data, buf_size));
 
         size_t const to_copy = std::min(remaining, size_t{32});
         span_copy(output.subspan(offset, to_copy), span<uint8_t const>(hash).first(to_copy));
