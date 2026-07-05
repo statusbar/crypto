@@ -16,6 +16,7 @@
 
 #    include "statusbar/crypto/p256/p256.hpp"
 #    include "statusbar/crypto/p256/p256_constants.hpp"
+#    include "statusbar/crypto/p256/p256_wire_constants.hpp"
 #    include "statusbar/crypto/sha/sha256_hw.hpp"
 #    include "statusbar/crypto/util/crypto_util_internal.hpp"
 
@@ -1141,6 +1142,23 @@ auto p256_encode_point_x(P256AffinePoint const& P) -> std::array<uint8_t, p256_c
     return out;
 }
 
+// SEC 1 §2.3.6: a point coordinate must be a canonical field element (< p).
+// p256_fe_from_bytes does not reduce, so a non-canonical x/y in [p, 2^256)
+// would otherwise be silently accepted as its reduced representative.
+// Constant-time big-endian comparison against the field prime.
+static auto p256_coord_is_canonical(span<uint8_t const, p256_field_element_size> v) -> bool
+{
+    uint32_t lt = 0, gt = 0;
+    for (size_t i = 0; i < p256_field_element_size; ++i) {
+        uint32_t const a = v[i];
+        uint32_t const b = p256_field_prime_bytes[i];
+        uint32_t const not_decided = 1u - ((lt | gt) & 1u);
+        lt |= not_decided & (((a - b) >> 8) & 1u);
+        gt |= not_decided & (((b - a) >> 8) & 1u);
+    }
+    return lt == 1u;
+}
+
 auto p256_decode_point_x(span<uint8_t const, p256_compressed_point_size> encoded) -> std::optional<P256AffinePoint>
 {
     if (encoded[0] != 0x01) {
@@ -1149,6 +1167,10 @@ auto p256_decode_point_x(span<uint8_t const, p256_compressed_point_size> encoded
 
     std::array<uint8_t, p256_field_element_size> x_bytes{};
     span_copy(x_bytes, encoded.template subspan<1, p256_field_element_size>());
+
+    if (!p256_coord_is_canonical(x_bytes)) {
+        return std::nullopt;
+    }
 
     P256FieldElement const x = p256_fe_from_bytes(x_bytes);
 
@@ -1190,6 +1212,10 @@ auto p256_decode_point_uncompressed(span<uint8_t const, p256_uncompressed_point_
     std::array<uint8_t, p256_field_element_size> y_bytes{};
     span_copy(x_bytes, encoded.template first<p256_field_element_size>());
     span_copy(y_bytes, encoded.template last<p256_field_element_size>());
+
+    if (!p256_coord_is_canonical(x_bytes) || !p256_coord_is_canonical(y_bytes)) {
+        return std::nullopt;
+    }
 
     P256AffinePoint P{.x = p256_fe_from_bytes(x_bytes), .y = p256_fe_from_bytes(y_bytes)};
 

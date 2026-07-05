@@ -10,6 +10,7 @@
 
 #include "statusbar/crypto/p256/p256_fe32.hpp"
 #include "statusbar/crypto/p256/p256_sc32.hpp"
+#include "statusbar/crypto/p256/p256_wire_constants.hpp"
 #include "statusbar/crypto/sha/sha256_hw.hpp"
 
 #include <array>
@@ -354,9 +355,28 @@ auto p256x32_encode_point_x(P256AffinePoint32 const& P) -> std::array<uint8_t, 3
     return out;
 }
 
+// SEC 1 §2.3.6: a point coordinate must be a canonical field element (< p).
+// p256_fe32_from_bytes does not reduce, so a non-canonical x/y in [p, 2^256)
+// would otherwise be silently accepted. Constant-time big-endian compare.
+static auto p256x32_coord_is_canonical(std::span<uint8_t const, 32> v) -> bool
+{
+    uint32_t lt = 0, gt = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        uint32_t const a = v[i];
+        uint32_t const b = p256_field_prime_bytes[i];
+        uint32_t const not_decided = 1u - ((lt | gt) & 1u);
+        lt |= not_decided & (((a - b) >> 8) & 1u);
+        gt |= not_decided & (((b - a) >> 8) & 1u);
+    }
+    return lt == 1u;
+}
+
 auto p256x32_decode_point_x(std::span<uint8_t const, 33> encoded) -> std::optional<P256AffinePoint32>
 {
     if (encoded[0] != 0x01) {
+        return std::nullopt;
+    }
+    if (!p256x32_coord_is_canonical(encoded.subspan<1, 32>())) {
         return std::nullopt;
     }
     auto const x = p256_fe32_from_bytes(encoded.subspan<1, 32>());
@@ -393,6 +413,9 @@ auto p256x32_encode_point_uncompressed(P256AffinePoint32 const& P) -> std::array
 
 auto p256x32_decode_point_uncompressed(std::span<uint8_t const, 64> encoded) -> std::optional<P256AffinePoint32>
 {
+    if (!p256x32_coord_is_canonical(encoded.subspan<0, 32>()) || !p256x32_coord_is_canonical(encoded.subspan<32, 32>())) {
+        return std::nullopt;
+    }
     P256AffinePoint32 const p{
         .x = p256_fe32_from_bytes(encoded.subspan<0, 32>()), .y = p256_fe32_from_bytes(encoded.subspan<32, 32>())};
     if (!p256x32_point_on_curve(p)) {
