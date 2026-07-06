@@ -40,8 +40,8 @@ There are two curve profiles:
    ECPrivateKey). Import accepts the OpenSSL-style 138-byte form with
    the public key included.
 
-DER parsing is shared via `der_internal.hpp` (`der_read_length`,
-`der_read_oid`, etc.) — an internal-only helper header, not part of
+DER parsing is shared via `der_internal.hpp` (`der_read_length`) — an
+internal-only helper header, not part of
 the public API.
 
 ## Key types
@@ -82,8 +82,10 @@ the public API.
   shortest legal DER (no optional `[1] publicKey` attribute, no
   `version 1` markers beyond what RFC 5958 / RFC 5915 mandate).
   Round-tripping through OpenSSL is supported by the **import**
-  side, which accepts the optional public-key attribute and ignores
-  it (Ed25519) or re-derives and cross-checks (P-256).
+  side, which accepts the optional public-key attribute and ignores it:
+  the private key is always recovered from the seed (Ed25519) or
+  re-derived as `Q = d · G` (P-256); the embedded public key is not
+  read back or cross-checked.
 - **Ed25519 seed vs. expanded key.** The PKCS#8 envelope for Ed25519
   per RFC 8032 carries the **32-byte seed**, not the 64-byte
   expanded `(scalar || nonce_prefix)`. Because the codebase's

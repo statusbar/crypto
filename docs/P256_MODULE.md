@@ -30,8 +30,11 @@ The layers, bottom-up:
 3. **Group operations.** `P256JacobianPoint` (X, Y, Z) with `Z = 0`
    marking the identity, plus an affine `P256AffinePoint` for I/O.
    `p256_point_double` is the dedicated `a = −3` doubling formula;
-   `p256_point_add` is the complete addition formula that handles all
-   edge cases. Scalar multiplication: `p256_scalar_mult_base` for
+   `p256_point_add` is a Jacobian addition with explicit identity/equal
+   handling (not a fully unified/complete formula — the constant-time
+   mixed-add used inside scalar multiplication has an unhandled
+   accumulator-equals-base case whose reachability is negligible for
+   hash-derived scalars). Scalar multiplication: `p256_scalar_mult_base` for
    fixed-base, `p256_scalar_mult` for variable-base,
    `p256_double_scalar_mult` (Shamir's trick) for verify.
 4. **Protocol primitives.** `p256_ecdh.hpp` (ECDH per SP 800-56A r3
@@ -93,7 +96,11 @@ scalar multiplication, key generation, point encoding — run on a
   (HMAC-DRBG over the message + private key) — no RNG needed at sign
   time, and same `(d, m)` always produces the same `(r, s)`.
   Eliminates the catastrophic-nonce-reuse failure mode of FIPS 186-5
-  random-`k` ECDSA.
+  random-`k` ECDSA. Nonces are drawn by RFC 6979 rejection sampling
+  (candidates `≥ n` are rejected, not reduced) so `k` is uniform.
+- **Signature malleability.** `verify` accepts both `s` and `n − s` for a
+  given message — it does not enforce low-`s`. If you dedupe or fingerprint
+  signatures, canonicalize to low-`s` yourself.
 - **Test vectors.** ECDH is checked against NIST CAVP ECC CDH
   (SP 800-56A) P-256 vectors. ECDSA is checked against RFC 6979 A.2.5
   (P-256 + SHA-256, message "sample") and re-sign/verify

@@ -77,7 +77,7 @@ randomness only for the seed at keypair generation.
   experimental until that lands.
 - **Constant-time scalar mult.** `curve25519_scalar_mult` (X25519
   ladder), `ge_scalar_mult_base` (Ed25519 fixed-base), and the
-  `fe25519_cmov` / `ed25519_ge_cmov` selection primitives run in
+  `fe25519_cmov` / `fe25519x32_cmov` selection primitives run in
   constant time with respect to secret scalars. The 32-bit
   reduced-radix variants match. The double-scalar verifier
   `ge_double_scalar_mult_vartime` is **deliberately variable-time** —
@@ -88,9 +88,13 @@ randomness only for the seed at keypair generation.
   callers **must** check `x25519_shared_secret_is_valid` (all-zero
   rejection) before using the secret. RFC 7748 §6.1 leaves this to the
   protocol layer.
-- **Canonical S in verify.** `ed25519_verify` rejects signatures with
-  S ≥ L, matching the strict verification rules in
-  draft-irtf-cfrg-eddsa-for-jose and RFC 8032 §5.1.7.
+- **Verification semantics.** `ed25519_verify` enforces canonical `S < L`
+  (rejecting signature malleability) and uses the cofactorless
+  encoding-equality check (`[S]B == R + [H(R‖A‖M)]A`, comparing the
+  re-encoded `R` byte-for-byte). It does **not** additionally reject
+  non-canonical `y` encodings (`y ≥ p`) or small-order public keys, so it
+  is permissive rather than strict per RFC 8032 §5.1.7 — results can
+  differ from a strict verifier on adversarially-encoded keys/signatures.
 - **Test vectors.** X25519 is checked against RFC 7748 §6.1 (Alice/Bob
   ECDH, basepoint iteration); Ed25519 against RFC 8032 §7.1 vectors
   1–4 (empty, 1-byte, 2-byte, 1023-byte). The 32-bit port is

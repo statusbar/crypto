@@ -57,8 +57,9 @@ unauthenticated bytes.
 
 Per-key budgets and message-size limits are different from AES-GCM-SIV:
 ~2⁶⁴ messages per key (deterministic SIV, 128-bit birthday bound) versus
-2³² for AES-GCM-SIV. AES-256-SIV explicitly bounds plaintext at 2³⁶ bytes
-(64 GB) — this matches the AES-CTR 32-bit-counter limit and is enforced
+2³² for AES-GCM-SIV. AES-256-SIV explicitly bounds plaintext at 2³⁵ bytes
+(32 GB) — the SIV clears the top bit of the two middle counter words
+(RFC 5297 §2.6), leaving 2³¹ usable 16-byte CTR blocks — and is enforced
 at the entry point: oversize inputs return an all-zero SIV and decrypt
 rejects oversize ciphertexts.
 
@@ -86,7 +87,7 @@ rejects oversize ciphertexts.
 
 - **Single string of associated data.** The public API exposes one AAD span, not a vector of AD strings. RFC 5297's S2V is defined over an ordered list; callers that need multiple AD components must concatenate (and pin the framing) themselves. This is the same shape `pyca/cryptography`'s `AESSIV` uses for cross-validation.
 - **Per-key message budget (~2⁶⁴).** SIV's per-message authentication tag is derived deterministically from the input, so the birthday bound on tag collisions is 2⁶⁴ messages under a single key. For AVB streaming this is effectively unlimited — see [`AES128_VS_AES256_REPORT.md`](AES128_VS_AES256_REPORT.md) for the comparison with AES-GCM-SIV's 2³² budget.
-- **Per-message size limit.** AES-256-SIV enforces 2³⁶ bytes (64 GB) at the entry point per RFC 5297 §2.4; oversize inputs return an empty SIV from `encrypt()` and `false` from `decrypt()`. AES-128-SIV inherits the same algorithmic limit but does not currently include the explicit guard — keep messages well below 64 GB regardless.
+- **Per-message size limit.** AES-256-SIV enforces 2³⁵ bytes (32 GB) at the entry point (2³¹ CTR blocks — the SIV construction clears one counter bit in each of the two middle words); oversize inputs return an empty SIV from `encrypt()` and `false` from `decrypt()`. AES-128-SIV inherits the same algorithmic limit but does not currently include the explicit guard — keep messages well below 32 GB regardless.
 - **128 vs 256 keys.** The 128-bit AES block size — not the key size — bounds the per-key message count and per-message size. The 256-bit variant only adds key-strength margin (and quantum resistance). See [`AES128_VS_AES256_REPORT.md`](AES128_VS_AES256_REPORT.md).
 - **Constant-time posture.** Tag comparison uses `internal::constant_time_equal`. Hardware AES paths are constant-time by construction; software fallbacks use S-box lookups and are not. Prefer hosts with AES-NI or ARMv8 Crypto Extensions for any side-channel-sensitive deployment.
 - **Zeroisation on decrypt failure.** The plaintext buffer is wiped before `decrypt()` returns `false`.
