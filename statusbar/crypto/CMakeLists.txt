@@ -122,6 +122,7 @@ add_subdirectory(kdf2)
 add_subdirectory(p256)
 add_subdirectory(polyval)
 add_subdirectory(sha)
+add_subdirectory(util)
 
 # ECIES and PKCS#8 are built entirely on the elliptic-curve API, so they are
 # included only where the 128-bit-integer implementations exist.

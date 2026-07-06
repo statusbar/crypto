@@ -411,6 +411,37 @@ TEST(aes128_gcm_siv, decrypt_bad_tag)
     EXPECT_TRUE(zeroed);
 }
 
+// Encrypting under one AAD and decrypting under a different AAD must be
+// rejected — the tag authenticates the AAD. (Previously only tag/ciphertext
+// corruption was covered, not AAD binding.)
+TEST(aes128_gcm_siv, decrypt_rejects_wrong_aad)
+{
+    Aes128Key key = {{{0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00}}};
+    std::array<uint8_t, 12> nonce = {0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15};
+    std::array<uint8_t, 5> const aad1 = {0x01, 0x02, 0x03, 0x04, 0x05};
+    std::array<uint8_t, 5> const aad2 = {0x01, 0x02, 0x03, 0x04, 0x06};  // one byte differs
+    std::array<uint8_t, 16> const pt = {0xde, 0xad, 0xbe, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x11, 0x22, 0x33, 0x44};
+
+    auto ct = pt;
+    auto const tag = aes128_gcm_siv_encrypt(key, nonce, ct, aad1);  // ct now holds ciphertext
+
+    // Correct AAD decrypts back to the plaintext.
+    auto d_ok = ct;
+    EXPECT_TRUE(aes128_gcm_siv_decrypt(key, nonce, d_ok, tag, aad1));
+    EXPECT_TRUE(span_compare(d_ok, pt));
+
+    // A different AAD must fail authentication and zeroize the buffer.
+    auto d_bad = ct;
+    EXPECT_TRUE(!aes128_gcm_siv_decrypt(key, nonce, d_bad, tag, aad2));
+    for (auto b : d_bad) {
+        EXPECT_EQ(b, 0U);
+    }
+
+    // Empty AAD (when non-empty AAD was used) must also fail.
+    auto d_empty = ct;
+    EXPECT_TRUE(!aes128_gcm_siv_decrypt(key, nonce, d_empty, tag, {}));
+}
+
 //
 // Roundtrip
 //
