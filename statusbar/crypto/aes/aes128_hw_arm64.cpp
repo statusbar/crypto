@@ -11,6 +11,7 @@
 
 #include "statusbar/crypto/aes/aes128_hw.hpp"
 #include "statusbar/crypto/aes/aes_common_internal.hpp"
+#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 #include <cstring>
@@ -54,6 +55,10 @@ auto aes128_expand_key_hw(Aes128Key const& key) -> Aes128RoundKeys
 
 void aes128_encrypt_block_hw(Aes128RoundKeys const& rk, span<uint8_t, aes128_block_size> block)
 {
+    if (!internal::arm_has_aes()) {
+        aes128_encrypt_block_sw(rk, block);
+        return;
+    }
     // ARMv8 AESE instruction: AddRoundKey(state, key) then SubBytes+ShiftRows
     // ARMv8 AESMC instruction: MixColumns
     //
@@ -86,6 +91,12 @@ void aes128_encrypt_block_hw(Aes128RoundKeys const& rk, span<uint8_t, aes128_blo
 
 void aes128_encrypt_blocks_x4_hw(Aes128RoundKeys const& rk, span<uint8_t, 4 * aes128_block_size> blocks)
 {
+    if (!internal::arm_has_aes()) {
+        for (size_t i = 0; i < 4; ++i) {
+            aes128_encrypt_block_sw(rk, blocks.subspan(i * aes128_block_size).first<aes128_block_size>());
+        }
+        return;
+    }
     // Interleave 4 independent AES encryptions across the 10 rounds so the
     // CPU's AES pipeline stays full. Each round loads one round key, then
     // applies AESE+AESMC to all 4 states before moving on — so round-key
@@ -130,6 +141,10 @@ void aes128_encrypt_blocks_x4_hw(Aes128RoundKeys const& rk, span<uint8_t, 4 * ae
 
 void aes128_decrypt_block_hw(Aes128RoundKeys const& rk, span<uint8_t, aes128_block_size> block)
 {
+    if (!internal::arm_has_aes()) {
+        aes128_decrypt_block_sw(rk, block);
+        return;
+    }
     // ARMv8 AESD: XOR round key then InvSubBytes+InvShiftRows
     // ARMv8 AESIMC: InvMixColumns
     //
@@ -159,18 +174,27 @@ void aes128_decrypt_block_hw(Aes128RoundKeys const& rk, span<uint8_t, aes128_blo
 
 auto aes128_cmac_hw(Aes128RoundKeys const& rk, span<uint8_t const> message) -> std::array<uint8_t, aes128_block_size>
 {
+    if (!internal::arm_has_aes()) {
+        return aes128_cmac_sw(rk, message);
+    }
     return internal::cmac_core([&rk](auto block) { aes128_encrypt_block_hw(rk, block); }, message);
 }
 
 auto aes128_cmac_xorend_hw(Aes128RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes128_block_size> xor_end)
     -> std::array<uint8_t, aes128_block_size>
 {
+    if (!internal::arm_has_aes()) {
+        return aes128_cmac_xorend_sw(rk, message, xor_end);
+    }
     return internal::cmac_xorend_core([&rk](auto block) { aes128_encrypt_block_hw(rk, block); }, message, xor_end);
 }
 
 auto aes128_cmac_verify_hw(
     Aes128RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes128_block_size> expected_tag) -> bool
 {
+    if (!internal::arm_has_aes()) {
+        return aes128_cmac_verify_sw(rk, message, expected_tag);
+    }
     return internal::cmac_verify_core([&rk](auto block) { aes128_encrypt_block_hw(rk, block); }, message, expected_tag);
 }
 
