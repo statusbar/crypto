@@ -7,7 +7,6 @@
 
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 #include "statusbar/crypto/util/secure_array.hpp"
-
 #include "statusbar/test/test.hpp"
 
 #include <array>
