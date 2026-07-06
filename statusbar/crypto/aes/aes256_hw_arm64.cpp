@@ -8,6 +8,7 @@
 
 #include "statusbar/crypto/aes/aes256_hw.hpp"
 #include "statusbar/crypto/aes/aes_common_internal.hpp"
+#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 #include <cstring>
@@ -49,6 +50,10 @@ auto aes256_expand_key_hw(Aes256Key const& key) -> Aes256RoundKeys
 
 void aes256_encrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
+    if (!internal::arm_has_aes()) {
+        aes256_encrypt_block_sw(rk, block);
+        return;
+    }
     uint8x16_t state = load_block(block);
 
     // Rounds 0-12: AESE + AESMC
@@ -75,6 +80,10 @@ void aes256_encrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_blo
 
 void aes256_decrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
+    if (!internal::arm_has_aes()) {
+        aes256_decrypt_block_sw(rk, block);
+        return;
+    }
     // Equivalent Inverse Cipher: round keys 1-13 need AESIMC applied.
     // Keys 0 and 14 are used as-is.
 
@@ -105,18 +114,27 @@ void aes256_decrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_blo
 
 auto aes256_cmac_hw(Aes256RoundKeys const& rk, span<uint8_t const> message) -> std::array<uint8_t, aes256_block_size>
 {
+    if (!internal::arm_has_aes()) {
+        return aes256_cmac_sw(rk, message);
+    }
     return internal::cmac_core([&rk](auto block) { aes256_encrypt_block_hw(rk, block); }, message);
 }
 
 auto aes256_cmac_xorend_hw(Aes256RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes256_block_size> xor_end)
     -> std::array<uint8_t, aes256_block_size>
 {
+    if (!internal::arm_has_aes()) {
+        return aes256_cmac_xorend_sw(rk, message, xor_end);
+    }
     return internal::cmac_xorend_core([&rk](auto block) { aes256_encrypt_block_hw(rk, block); }, message, xor_end);
 }
 
 auto aes256_cmac_verify_hw(
     Aes256RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes256_block_size> expected_tag) -> bool
 {
+    if (!internal::arm_has_aes()) {
+        return aes256_cmac_verify_sw(rk, message, expected_tag);
+    }
     return internal::cmac_verify_core([&rk](auto block) { aes256_encrypt_block_hw(rk, block); }, message, expected_tag);
 }
 
