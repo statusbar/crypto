@@ -21,10 +21,11 @@ compression function — ARMv8 SHA-2 crypto extensions
 (`SHA256H`/`SHA256H2`/`SHA256SU0`/`SHA256SU1`) on aarch64, Intel SHA-NI
 (`SHA256RNDS2`/`SHA256MSG1`/`SHA256MSG2`) on x86-64 — and fall back to
 the software compression function on hosts that lack the extension.
-SHA-512 has an aarch64 path (ARMv8.2-A SHA-512 instructions
-`SHA512H`/`SHA512H2`/`SHA512SU0`/`SHA512SU1`); there is no x86-64 SHA-512
-hardware extension, so `sha512_hw*` on x86-64 reuses the software
-compression directly.
+SHA-512 currently delegates to the software compression on every
+platform: the aarch64 backend (`sha512_hw_arm64.cpp`) is a software
+fallback pending validation of the ARMv8.2-A SHA-512 instructions
+(`SHA512H`/`SHA512H2`/`SHA512SU0`/`SHA512SU1`), and x86-64 has no SHA-512
+hardware extension at all.
 
 SHA-256 is exposed as a one-shot API only — there is no public
 streaming context. SHA-512 ships a public incremental context
@@ -40,10 +41,11 @@ pre-hashed; short keys are zero-padded to the block size. A two-span
 overload concatenates `message1 ‖ message2` without requiring callers to
 materialize the joined buffer — HKDF and ECIES rely on this.
 
-The compression functions zero working variables (`a`..`h`) on every
-scope exit via `SecureZeroRef`, and contexts zero their state in their
-destructors, so HMAC keys never linger on the stack after a digest
-completes.
+The software compression functions zero their working variables
+(`a`..`h`) on every scope exit via `SecureZeroRef`, and contexts zero
+their state in their destructors, so HMAC keys never linger on the stack
+after a digest completes. (The hardware backends keep round state in
+vector registers, outside that guarantee.)
 
 ## Key types
 
@@ -75,7 +77,7 @@ completes.
 - **Pre-release, unaudited.** Mirror the package-level caveat: these implementations conform to the published test vectors but have not been third-party audited or run under `ctgrind`/`dudect`. For production where strong guarantees matter, prefer a vetted library.
 - **Test vectors.** `sha256_test.cpp` and `sha512_test.cpp` exercise the FIPS 180-4 examples (`"abc"`, the two-block 56-byte string, the empty string, the one-million-`a` stream); HMAC-SHA-256 is covered by the RFC 4231 vectors. The `_hw_test.cpp` files re-run the same vectors through the hardware path and cross-check against the software path on the same input.
 - **Constant-time posture.** SHA itself processes only public data; the compression function is data-independent in both `_sw` and `_hw` paths. HMAC's data-dependent step is the key-pad XOR, which is straight-line. No table lookups indexed by secret data.
-- **Runtime HW detection.** Selection happens at compile time via `__ARM_FEATURE_SHA2` / `__SHA__`. The umbrella ships separate translation units (`sha256_hw_arm64.cpp`, `sha256_hw_amd64.cpp`) that compile to no-ops on the wrong architecture, leaving the SW fallback live. There is no runtime CPUID probe yet.
+- **Runtime HW detection.** The x86-64 SHA-256 backend performs a cached runtime CPUID probe (`cpu_has_sha_ni()`) and falls back to software when SHA-NI is absent. The ARM64 backend is compile-time gated on `__ARM_FEATURE_SHA2` with no runtime probe — an ARM64 build with the extension must run only on cores that have it. Translation units for the wrong architecture compile to no-ops, leaving the SW fallback live.
 - **Maximum message length.** Both algorithms track total length in a `uint64_t`, capping inputs at `2^61 − 1` bytes (the bit-length field would otherwise overflow). FIPS 180-4 allows SHA-512 inputs up to `2^128 − 1` bits; that range is not exposed here.
 - **Thread safety.** All free functions are reentrant. `Sha512Context` is not thread-safe — one context per thread.
 - **`SecureArray` return.** The `_secure_*` variants are the right choice whenever the digest is itself a key (HKDF PRK, Ed25519 expansion, HMAC tag re-used as a derivation input). The non-secure variants are cheaper when the digest is public output (file integrity, transcript hashing).

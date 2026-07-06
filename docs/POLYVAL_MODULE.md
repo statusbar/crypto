@@ -25,9 +25,10 @@ is `S_i = dot(S_{i-1} XOR X_i, H)`, where `X_i` are successive 16-byte
 input blocks and `H` is the per-message hash key.
 
 The software fallback implements the dot product as a `U128 × U128 →
-U128` carry-less multiplication using shift-and-XOR loops, then reduces
-modulo the POLYVAL polynomial via a Montgomery-style step (see
-`polyval_sw.cpp`). The hardware paths replace the multiplication with
+U128` carry-less multiplication using a right-shift shift-and-XOR loop
+that folds in the reduction as it goes, so the `x^-128` (Montgomery)
+factor inherent to POLYVAL's `dot` is produced directly rather than as a
+separate reduction step (see `polyval_sw.cpp`). The hardware paths replace the multiplication with
 single CPU instructions — PMULL/PMULL2 on ARMv8 (gated on
 `__ARM_FEATURE_AES`, since PMULL ships in the AES extension feature
 set) and PCLMULQDQ on x86-64 — and apply the same reduction with two
@@ -70,7 +71,7 @@ the implementations themselves assert the precondition.
 - **Constant-time posture.** The hardware paths (PMULL, PCLMULQDQ) are constant-time by design on every CPU known to ship them. The software shift-and-XOR fallback has no secret-dependent branches and no secret-indexed table lookups, but as the `polyval_hw.hpp` header warns, the compiler is not strictly required to keep it data-independent. For deployments where this matters, prefer hosts with hardware CLMUL and verify dispatch at runtime.
 - **Bit ordering.** `PolyvalKey::data` is little-endian. AES-GCM-SIV stores the derived hash key in the same convention; do not byte-reverse before passing it in.
 - **Block alignment.** `polyval_*` and `polyval_update_*` require `input.size() % 16 == 0`. Partial blocks must be zero-padded by the caller; the implementations assert.
-- **Runtime HW detection.** Dispatch is by translation unit — `polyval_hw_arm64.cpp` / `polyval_hw_amd64.cpp` compile to no-ops on the wrong architecture. No runtime CPUID probe yet; whichever path is compiled in is the path that runs.
+- **Runtime HW detection.** The x86-64 backend performs a cached runtime CPUID probe (PCLMULQDQ) and falls back to software when the instruction is absent. The ARM64 backend is compile-time gated with no runtime probe. Translation units for the wrong architecture compile to no-ops, leaving the software path live.
 - **Thread safety.** All free functions are reentrant. The `PolyvalKey` and accumulator are caller-owned and stack-allocatable — there is no global state.
 
 ## Further reading
