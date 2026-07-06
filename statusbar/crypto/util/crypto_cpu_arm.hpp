@@ -21,6 +21,7 @@
 #        include <sys/auxv.h>
 #    elif defined(__APPLE__)
 #        include <cstddef>
+
 #        include <sys/sysctl.h>
 #    endif
 
