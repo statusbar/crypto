@@ -116,7 +116,7 @@ auto polyval_hw(PolyvalKey const& H, span<uint8_t const> input) -> std::array<ui
 
 void polyval_update_hw(PolyvalKey const& H, span<uint8_t const> input, span<uint8_t, polyval_block_size> accumulator)
 {
-    if (cpu_polyval_hw_active()) {
+    if (internal::cpu_polyval_hw_active()) {
         polyval_update_ni(H, input, accumulator);
     } else {
         polyval_update_sw(H, input, accumulator);

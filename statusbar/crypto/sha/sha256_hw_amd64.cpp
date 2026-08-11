@@ -258,7 +258,7 @@ auto sha256_hmac_ni(span<uint8_t const> key, span<uint8_t const> message1, span<
 
 auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_sha256_hw_active()) {
+    if (internal::cpu_sha256_hw_active()) {
         return sha256_ni(message);
     }
     return sha256_sw(message);
@@ -266,7 +266,7 @@ auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest
 
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_sha256_hw_active()) {
+    if (internal::cpu_sha256_hw_active()) {
         return sha256_hmac_ni(key, message);
     }
     return sha256_hmac_sw(key, message);
@@ -275,7 +275,7 @@ auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message1, span<uint8_t const> message2)
     -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_sha256_hw_active()) {
+    if (internal::cpu_sha256_hw_active()) {
         return sha256_hmac_ni(key, message1, message2);
     }
     return sha256_hmac_sw(key, message1, message2);
@@ -283,7 +283,7 @@ auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message1, span<
 
 auto sha256_secure_hw(span<uint8_t const> message) -> SecureArray<sha256_digest_size>
 {
-    if (cpu_sha256_hw_active()) {
+    if (internal::cpu_sha256_hw_active()) {
         return SecureArray<sha256_digest_size>(sha256_ni(message));
     }
     return sha256_secure_sw(message);
