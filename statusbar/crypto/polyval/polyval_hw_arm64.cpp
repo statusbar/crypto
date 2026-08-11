@@ -7,7 +7,7 @@
 // POLYVAL operates over GF(2^128) with polynomial x^128 + x^127 + x^126 + x^121 + 1.
 
 #include "statusbar/crypto/polyval/polyval_hw.hpp"
-#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
+#include "statusbar/crypto/util/crypto_cpu.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 #include "statusbar/status/statusbar_assert.hpp"
 
@@ -77,7 +77,7 @@ auto polyval_dot_hw(uint8x16_t a, uint8x16_t b) -> uint8x16_t
 
 auto polyval_hw(PolyvalKey const& H, span<uint8_t const> input) -> std::array<uint8_t, polyval_block_size>
 {
-    if (!internal::arm_has_pmull()) {
+    if (!internal::cpu_polyval_hw_active()) {
         return polyval_sw(H, input);
     }
     std::array<uint8_t, polyval_block_size> result{};
@@ -87,7 +87,7 @@ auto polyval_hw(PolyvalKey const& H, span<uint8_t const> input) -> std::array<ui
 
 void polyval_update_hw(PolyvalKey const& H, span<uint8_t const> input, span<uint8_t, polyval_block_size> accumulator)
 {
-    if (!internal::arm_has_pmull()) {
+    if (!internal::cpu_polyval_hw_active()) {
         polyval_update_sw(H, input, accumulator);
         return;
     }

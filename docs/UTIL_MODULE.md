@@ -77,6 +77,16 @@ infrastructure lives in `statusbar-core`'s `test/` module.
   concepts plus `static_assert`s for the software key types.
 - `statusbar/crypto/util/crypto_has_int128.hpp` — defines
   `STATUSBAR_CRYPTO_HAS_INT128` (1 or 0) from `__SIZEOF_INT128__`.
+- `statusbar/crypto/util/crypto_backend.hpp` — `CryptoBackendReport`,
+  `crypto_backend_report()`, `crypto_backend_summary()`: which
+  implementation (hardware or software) each `_hw` primitive family
+  resolves to in this process, for startup logging. See
+  [HARDWARE_ACCELERATION.md](HARDWARE_ACCELERATION.md) ("Downgrade
+  resistance").
+- `statusbar/crypto/util/crypto_cpu.hpp` — internal: the centralized
+  compile-time + runtime CPU feature probes behind every `_hw`
+  dispatcher and the `STATUSBAR_CRYPTO_REQUIRE_HW` fail-closed policy
+  (`crypto_cpu_arm.hpp` holds the aarch64 HWCAP / sysctl probes).
 - `statusbar/crypto/util/crypto_util_internal.hpp` — internal grab-bag:
   `Uint128`/`Int128`, `SecureArray` overloads for `span_copy` etc.,
   little/big-endian load/store helpers, `dbl()` for GF(2^128) doubling,

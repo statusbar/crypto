@@ -51,6 +51,23 @@ else()
 endif()
 target_compile_options(statusbar-crypto PRIVATE ${STATUSBAR_CRYPTO_ARCH_FLAGS})
 
+# Fail-closed hardware policy: when ON, the *_hw dispatchers abort the process
+# instead of silently falling back to the software implementations when the
+# running CPU lacks the crypto instructions (and the build errors out if the
+# arch flags above don't even compile the hardware paths). For deployments on
+# known-capable hardware, this turns a silent downgrade — masked CPUID in a VM,
+# wrong arch flags, emulation — into an immediate, visible failure. SHA-512 is
+# exempt (it has no hardware backend yet). See docs/HARDWARE_ACCELERATION.md
+# ("Downgrade resistance").
+option(
+  STATUSBAR_CRYPTO_REQUIRE_HW
+  "Abort instead of falling back to software when CPU crypto acceleration is unavailable"
+  OFF)
+if(STATUSBAR_CRYPTO_REQUIRE_HW)
+  target_compile_definitions(statusbar-crypto
+                             PRIVATE STATUSBAR_CRYPTO_REQUIRE_HW=1)
+endif()
+
 # Detect a compiler-provided 128-bit integer type. The 5x51 / 4x64-bit
 # elliptic-curve code uses __uint128_t; a 32-bit ALU lacks that type, so on such
 # targets only the reduced-radix *32 implementations are built. The high-level
@@ -130,6 +147,19 @@ if(STATUSBAR_HAS_INT128)
   add_subdirectory(ecies)
   add_subdirectory(pkcs8)
 endif()
+
+# SECURITY INVARIANT: crypto dispatch must never be influenced by environment
+# variables (downgrade-attack surface — cf. OpenSSL's OPENSSL_ia32cap, which
+# masks CPUID bits from the environment and forces the side-channel-prone
+# software paths). Enforced by grepping every source in this module for getenv:
+# grep exits non-zero when nothing matches, and WILL_FAIL inverts that, so the
+# test PASSES only when no getenv call exists anywhere. When a match is found,
+# grep prints the offending file:line and exits 0, which WILL_FAIL turns into a
+# test failure. See docs/HARDWARE_ACCELERATION.md.
+add_test(NAME statusbar_crypto/no_env_knobs
+         COMMAND grep -rn "getenv" "--include=*.cpp" "--include=*.hpp"
+                 ${CMAKE_CURRENT_SOURCE_DIR})
+set_tests_properties(statusbar_crypto/no_env_knobs PROPERTIES WILL_FAIL TRUE)
 
 # Python cross-validation test (requires uv and the python/crypto tree, which
 # ships with the crypto export package — see the crypto package in

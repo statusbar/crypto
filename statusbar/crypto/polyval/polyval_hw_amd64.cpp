@@ -6,17 +6,17 @@
 // Uses carry-less multiplication (PCLMULQDQ) for GF(2^128) dot product.
 // POLYVAL operates over GF(2^128) with polynomial x^128 + x^127 + x^126 + x^121 + 1.
 //
-// Runtime CPUID detection: checks for PCLMULQDQ at runtime (CPUID leaf 1, ECX bit 1)
-// and falls back to software if not available.
+// Runtime dispatch via internal::cpu_polyval_hw_active() (util/crypto_cpu.hpp):
+// PCLMULQDQ when the CPU has it, software fallback otherwise.
 
 #include "statusbar/crypto/polyval/polyval_hw.hpp"
+#include "statusbar/crypto/util/crypto_cpu.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 #include "statusbar/status/statusbar_assert.hpp"
 
 #include <cstring>
 
 #if defined(__x86_64__) && defined(__PCLMUL__)
-#    include <cpuid.h>
 #    include <immintrin.h>
 #    include <wmmintrin.h>
 #endif
@@ -31,20 +31,6 @@ using std::span;
 #if defined(__x86_64__) && defined(__PCLMUL__)
 
 namespace {
-
-/// @brief Check CPUID leaf 1, ECX bit 1 for PCLMULQDQ support.
-///
-/// Cached in a static local so the CPUID instruction executes only once.
-/// @return true if the CPU supports PCLMULQDQ.
-auto cpu_has_pclmulqdq() -> bool
-{
-    static bool const result = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid(1, eax, ebx, ecx, edx);
-        return (ecx & (1u << 1)) != 0;
-    }();
-    return result;
-}
 
 /// @brief GF(2^128) multiplication with POLYVAL reduction using x86-64 PCLMULQDQ.
 ///
@@ -130,7 +116,7 @@ auto polyval_hw(PolyvalKey const& H, span<uint8_t const> input) -> std::array<ui
 
 void polyval_update_hw(PolyvalKey const& H, span<uint8_t const> input, span<uint8_t, polyval_block_size> accumulator)
 {
-    if (cpu_has_pclmulqdq()) {
+    if (cpu_polyval_hw_active()) {
         polyval_update_ni(H, input, accumulator);
     } else {
         polyval_update_sw(H, input, accumulator);
