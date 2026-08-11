@@ -26,34 +26,37 @@ POLYVAL primitives they consume.
 
 ## How dispatch works
 
-There are two distinct dispatch styles in the codebase. **Read this
-section before assuming runtime detection is uniform.**
+Detection is centralized in `util/crypto_cpu.hpp`: every `_hw`
+dispatcher calls `internal::cpu_aes_hw_active()` /
+`cpu_sha256_hw_active()` / `cpu_polyval_hw_active()`, which combine a
+compile-time gate with a runtime probe:
 
-**x86-64 — runtime CPUID probe.** The amd64 `_hw` files implement an
-internal `cpu_has_aes_ni()` / `cpu_has_sha_ni()` / `cpu_has_pclmulqdq()`
-helper that runs `__cpuid()` once, caches the result in a function-local
-`static`, and dispatches per call:
+- **Compile-time gate.** The accelerated bodies only exist when the
+  compiler was invoked with the relevant feature flags — `__AES__` /
+  `__SHA__` / `__PCLMUL__` on x86-64, `__ARM_FEATURE_AES` /
+  `__ARM_FEATURE_SHA2` on ARM64. The umbrella sets
+  `STATUSBAR_CRYPTO_ARCH_FLAGS` to `-mcpu=native+aes+sha2+sha3` on a
+  native ARM64 build, `-march=armv8-a+crypto` on a cross-build, and
+  `-maes;-mpclmul;-msha;-msse4.1` on x86-64 (see
+  `crypto/statusbar/crypto/CMakeLists.txt`). Without the flags, the
+  `_hw` files compile to pure-SW fallbacks.
+- **Runtime probe.** x86-64 runs `__cpuid()` (AES-NI: leaf 1 ECX.25,
+  SHA-NI: leaf 7 EBX.29, PCLMULQDQ: leaf 1 ECX.1). ARM64 checks
+  `getauxval(AT_HWCAP)` on Linux and
+  `sysctlbyname("hw.optional.arm.FEAT_*")` on macOS (see
+  `util/crypto_cpu_arm.hpp`); executing the intrinsics on a core
+  without the feature would raise SIGILL, so the probe is mandatory.
+  Results are cached in function-local `static`s — one probe per
+  process.
+
+A single binary therefore runs correctly on both a capable and an
+incapable CPU of the same architecture (useful for distro packaging),
+dispatching per call:
 
 ```cpp
-if (cpu_has_aes_ni()) { aes128_encrypt_block_ni(...); }
-else                  { aes128_encrypt_block_sw(...); }
+if (cpu_aes_hw_active()) { aes128_encrypt_block_ni(...); }
+else                     { aes128_encrypt_block_sw(...); }
 ```
-
-This means a single binary runs on both an AES-NI-capable Skylake and a
-pre-Westmere CPU without re-linking — useful for distro packaging.
-
-**ARM64 — compile-time gating.** The arm64 `_hw` files guard their
-entire HW body on `defined(__aarch64__) && defined(__ARM_FEATURE_AES)`
-(or `__ARM_FEATURE_SHA2`, `__ARM_FEATURE_SHA512`). If the compiler was
-not invoked with a flag that enables those features (e.g.
-`-march=armv8-a+crypto`), the file compiles to a pure-SW fallback. The
-umbrella sets `STATUSBAR_CRYPTO_ARCH_FLAGS` to `-mcpu=native+aes+sha2+sha3`
-on a native build and `-march=armv8-a+crypto` on a cross-build (see
-`crypto/statusbar/crypto/CMakeLists.txt`), so the AES, SHA-256 and
-PMULL features are reliably enabled on all the targets the package
-ships for (Cortex-A72 / A76 / Apple Silicon / Graviton). No runtime
-probe is performed on ARM64; the assumption is that if you built with
-`+crypto`, your deploy hardware has it.
 
 ## SW fallback
 
@@ -86,9 +89,48 @@ variants exist specifically because AESENC has 3–4 cycle latency but
 1-cycle throughput on modern cores — issuing four independent block
 operations keeps the AES unit fed.
 
+## Downgrade resistance
+
+Because the AES SW fallback is not cache-timing safe, "disable the
+hardware crypto" is an attack, not just a performance regression: a
+hypervisor masking CPUID leaves, a kernel booted with masked hwcaps, a
+container image running under emulation, or a mis-set
+`STATUSBAR_CRYPTO_ARCH_FLAGS` all silently divert secret-key material
+through the leaky table-based path for the lifetime of the deployment.
+Three mechanisms address this:
+
+1. **No override knobs — invariant.** Detection depends only on the CPU
+   and the compiled feature macros. There is deliberately no environment
+   variable, config file, or API that can influence dispatch (contrast
+   OpenSSL's `OPENSSL_ia32cap`, which lets anyone who controls the
+   environment mask CPUID bits). This is enforced by the
+   `statusbar_crypto/no_env_knobs` ctest, which fails the suite if any
+   `getenv` call appears anywhere in the crypto sources. Keep it that
+   way: new configuration must never reach `util/crypto_cpu.hpp`.
+
+2. **Observable resolution.** `crypto_backend_report()` /
+   `crypto_backend_summary()` (`util/crypto_backend.hpp`) report which
+   implementation each family resolves to in this process. Long-running
+   daemons log the one-line summary (`aes=hw sha256=hw sha512=sw
+   polyval=hw`) once at startup, so a downgrade shows up as a log
+   anomaly instead of going unnoticed.
+
+3. **Fail closed (opt-in).** Configuring with
+   `-DSTATUSBAR_CRYPTO_REQUIRE_HW=ON` makes the `_hw` dispatchers abort
+   the process (with a message naming the primitive) instead of falling
+   back, and makes the build error out if the arch flags don't compile
+   the hardware paths at all. Use it for deployments on known-capable
+   hardware, where a software fallback can only mean the platform is
+   lying. SHA-512 is exempt — it has no hardware backend yet, so there
+   is nothing to require. Note that Raspberry Pi SoCs (BCM2711/BCM2712)
+   do not implement the ARMv8 crypto extensions; this option is not for
+   Pi-class targets.
+
 ## Disabling HW
 
-There is no dedicated `ENABLE_HW=OFF` switch. To force the SW path:
+There is no dedicated `ENABLE_HW=OFF` switch, and deliberately no
+runtime switch at all (see "Downgrade resistance"). To force the SW
+path:
 
 - **Configure-time**, ARM64: pass `-DSTATUSBAR_CRYPTO_ARCH_FLAGS=` (empty
   string) to remove the `+crypto`/`+sha2` flags so the `__ARM_FEATURE_*`

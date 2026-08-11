@@ -6,20 +6,20 @@
 // Uses SHA256RNDS2 for hash rounds and SHA256MSG1/SHA256MSG2 for message schedule.
 // SHA-NI processes two rounds at a time. Requires SSE4.1 + SHA extensions.
 //
-// Runtime CPUID detection: SHA-NI is not available on all x86-64 CPUs (notably
-// absent on Intel before Ice Lake client / Goldmont Atom). The _hw functions
-// check at runtime and fall back to software if SHA-NI is missing.
+// Runtime dispatch via internal::cpu_sha256_hw_active() (util/crypto_cpu.hpp):
+// SHA-NI is not available on all x86-64 CPUs (notably absent on Intel before
+// Ice Lake client / Goldmont Atom); falls back to software when missing.
 
 #include "statusbar/crypto/sha/sha256_constants.hpp"
 #include "statusbar/crypto/sha/sha256_hmac.hpp"
 #include "statusbar/crypto/sha/sha256_hw.hpp"
+#include "statusbar/crypto/util/crypto_cpu.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 #include <algorithm>
 #include <cstring>
 
 #if defined(__x86_64__) && defined(__SHA__)
-#    include <cpuid.h>
 #    include <immintrin.h>
 #endif
 
@@ -35,20 +35,6 @@ using std::span;
 #if defined(__x86_64__) && defined(__SHA__)
 
 namespace {
-
-/// @brief Check CPUID leaf 7, subleaf 0, EBX bit 29 for SHA-NI support.
-///
-/// Cached in a static local so the CPUID instruction executes only once.
-/// @return true if the CPU supports SHA-NI instructions.
-auto cpu_has_sha_ni() -> bool
-{
-    static bool const result = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid_count(7, 0, eax, ebx, ecx, edx);
-        return (ebx & (1u << 29)) != 0;
-    }();
-    return result;
-}
 
 constexpr auto& K = constants::SHA256_K;
 
@@ -272,7 +258,7 @@ auto sha256_hmac_ni(span<uint8_t const> key, span<uint8_t const> message1, span<
 
 auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_has_sha_ni()) {
+    if (cpu_sha256_hw_active()) {
         return sha256_ni(message);
     }
     return sha256_sw(message);
@@ -280,7 +266,7 @@ auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest
 
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_has_sha_ni()) {
+    if (cpu_sha256_hw_active()) {
         return sha256_hmac_ni(key, message);
     }
     return sha256_hmac_sw(key, message);
@@ -289,7 +275,7 @@ auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message1, span<uint8_t const> message2)
     -> std::array<uint8_t, sha256_digest_size>
 {
-    if (cpu_has_sha_ni()) {
+    if (cpu_sha256_hw_active()) {
         return sha256_hmac_ni(key, message1, message2);
     }
     return sha256_hmac_sw(key, message1, message2);
@@ -297,7 +283,7 @@ auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message1, span<
 
 auto sha256_secure_hw(span<uint8_t const> message) -> SecureArray<sha256_digest_size>
 {
-    if (cpu_has_sha_ni()) {
+    if (cpu_sha256_hw_active()) {
         return SecureArray<sha256_digest_size>(sha256_ni(message));
     }
     return sha256_secure_sw(message);

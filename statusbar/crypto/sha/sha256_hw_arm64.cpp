@@ -9,7 +9,7 @@
 #include "statusbar/crypto/sha/sha256_constants.hpp"
 #include "statusbar/crypto/sha/sha256_hmac.hpp"
 #include "statusbar/crypto/sha/sha256_hw.hpp"
-#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
+#include "statusbar/crypto/util/crypto_cpu.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 #include <algorithm>
@@ -251,7 +251,7 @@ auto sha256_hw_final(Sha256HwCtx& ctx) -> std::array<uint8_t, sha256_digest_size
 
 auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (!internal::arm_has_sha2()) {
+    if (!internal::cpu_sha256_hw_active()) {
         return sha256_sw(message);
     }
     Sha256HwCtx ctx;
@@ -262,7 +262,7 @@ auto sha256_hw(span<uint8_t const> message) -> std::array<uint8_t, sha256_digest
 
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std::array<uint8_t, sha256_digest_size>
 {
-    if (!internal::arm_has_sha2()) {
+    if (!internal::cpu_sha256_hw_active()) {
         return sha256_hmac_sw(key, message);
     }
     return internal::sha256_hmac_generic<Sha256HwCtx>(
@@ -272,7 +272,7 @@ auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message) -> std
 auto sha256_hmac_hw(span<uint8_t const> key, span<uint8_t const> message1, span<uint8_t const> message2)
     -> std::array<uint8_t, sha256_digest_size>
 {
-    if (!internal::arm_has_sha2()) {
+    if (!internal::cpu_sha256_hw_active()) {
         return sha256_hmac_sw(key, message1, message2);
     }
     return internal::sha256_hmac_generic<Sha256HwCtx>(

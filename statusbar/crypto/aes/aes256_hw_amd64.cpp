@@ -7,17 +7,17 @@
 // AES-256 uses 14 rounds. Decryption requires Equivalent Inverse Cipher
 // round keys (InvMixColumns applied to encryption round keys 1..Nr-1).
 //
-// Runtime CPUID detection: checks for AES-NI at runtime (CPUID leaf 1, ECX bit 25)
-// and falls back to software if not available.
+// Runtime dispatch via internal::cpu_aes_hw_active() (util/crypto_cpu.hpp):
+// AES-NI when the CPU has it, software fallback otherwise.
 
 #include "statusbar/crypto/aes/aes256_hw.hpp"
 #include "statusbar/crypto/aes/aes_common_internal.hpp"
+#include "statusbar/crypto/util/crypto_cpu.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 #include <cstring>
 
 #if defined(__x86_64__) && defined(__AES__)
-#    include <cpuid.h>
 #    include <immintrin.h>
 #    include <wmmintrin.h>
 #endif
@@ -30,16 +30,6 @@ using std::span;
 #if defined(__x86_64__) && defined(__AES__)
 
 namespace {
-
-auto cpu_has_aes_ni() -> bool
-{
-    static bool const result = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid(1, eax, ebx, ecx, edx);
-        return (ecx & (1u << 25)) != 0;
-    }();
-    return result;
-}
 
 // The 3 helpers below wrap _mm_loadu_si128 / _mm_storeu_si128, which
 // require __m128i pointer casts from our byte spans.
@@ -143,7 +133,7 @@ auto aes256_expand_key_hw(Aes256Key const& key) -> Aes256RoundKeys
 
 void aes256_encrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
-    if (cpu_has_aes_ni()) {
+    if (cpu_aes_hw_active()) {
         aes256_encrypt_block_ni(rk, block);
     } else {
         aes256_encrypt_block_sw(rk, block);
@@ -152,7 +142,7 @@ void aes256_encrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_blo
 
 void aes256_decrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
-    if (cpu_has_aes_ni()) {
+    if (cpu_aes_hw_active()) {
         aes256_decrypt_block_ni(rk, block);
     } else {
         aes256_decrypt_block_sw(rk, block);
@@ -161,7 +151,7 @@ void aes256_decrypt_block_hw(Aes256RoundKeys const& rk, span<uint8_t, aes256_blo
 
 auto aes256_cmac_hw(Aes256RoundKeys const& rk, span<uint8_t const> message) -> std::array<uint8_t, aes256_block_size>
 {
-    if (cpu_has_aes_ni()) {
+    if (cpu_aes_hw_active()) {
         return aes256_cmac_ni(rk, message);
     }
     return aes256_cmac_sw(rk, message);
@@ -170,7 +160,7 @@ auto aes256_cmac_hw(Aes256RoundKeys const& rk, span<uint8_t const> message) -> s
 auto aes256_cmac_xorend_hw(Aes256RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes256_block_size> xor_end)
     -> std::array<uint8_t, aes256_block_size>
 {
-    if (cpu_has_aes_ni()) {
+    if (cpu_aes_hw_active()) {
         return aes256_cmac_xorend_ni(rk, message, xor_end);
     }
     return aes256_cmac_xorend_sw(rk, message, xor_end);
@@ -179,7 +169,7 @@ auto aes256_cmac_xorend_hw(Aes256RoundKeys const& rk, span<uint8_t const> messag
 auto aes256_cmac_verify_hw(
     Aes256RoundKeys const& rk, span<uint8_t const> message, span<uint8_t const, aes256_block_size> expected_tag) -> bool
 {
-    if (cpu_has_aes_ni()) {
+    if (cpu_aes_hw_active()) {
         return aes256_cmac_verify_ni(rk, message, expected_tag);
     }
     return aes256_cmac_verify_sw(rk, message, expected_tag);
