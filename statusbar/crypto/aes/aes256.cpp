@@ -18,6 +18,7 @@
 
 #include "statusbar/crypto/aes/aes256_constants.hpp"
 #include "statusbar/crypto/aes/aes_common_internal.hpp"
+#include "statusbar/crypto/aes/aes_ct_internal.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
 
 namespace statusbar::crypto {
@@ -81,15 +82,16 @@ auto aes256_expand_key_sw(Aes256Key const& key) -> Aes256RoundKeys
 
         if (i % 8 == 0) {
             // RotWord + SubWord + Rcon
+            auto const sw = aes_ct_sub_word({temp[1], temp[2], temp[3], temp[0]});
             temp = {
-                static_cast<uint8_t>(sbox[temp[1]] ^ rcon[(i / 8) - 1]),
-                sbox[temp[2]],
-                sbox[temp[3]],
-                sbox[temp[0]],
+                static_cast<uint8_t>(sw[0] ^ rcon[(i / 8) - 1]),
+                sw[1],
+                sw[2],
+                sw[3],
             };
         } else if (i % 8 == 4) {
             // SubWord only (AES-256 specific)
-            temp = {sbox[temp[0]], sbox[temp[1]], sbox[temp[2]], sbox[temp[3]]};
+            temp = aes_ct_sub_word(temp);
         }
 
         auto prev = wv.get(i - 8);
@@ -110,54 +112,17 @@ auto aes256_expand_key_sw(Aes256Key const& key) -> Aes256RoundKeys
 // Block encrypt / decrypt (FIPS 197 Sections 5.1, 5.3)
 //
 
-// AES-256 encryption: 14 rounds.
-// Round structure: SubBytes -> ShiftRows -> MixColumns -> AddRoundKey
-// Final round omits MixColumns per the standard.
+// AES-256 encryption: 14 rounds via the constant-time bitsliced core
+// (aes_ct_internal.hpp) — no table lookups, no secret-dependent timing.
 void aes256_encrypt_block_sw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
-    State s;
-    state_from_bytes(s, block);
-
-    add_round_key(s, rk.round_keys[0]);
-
-    for (size_t r = 1; r < aes256_num_rounds; ++r) {
-        sub_bytes(s);
-        shift_rows(s);
-        mix_columns(s);
-        add_round_key(s, rk.round_keys[r]);
-    }
-
-    // Final round (no MixColumns)
-    sub_bytes(s);
-    shift_rows(s);
-    add_round_key(s, rk.round_keys[aes256_num_rounds]);
-
-    state_to_bytes(s, block);
+    aes_ct_encrypt_block(rk.round_keys, block);
 }
 
-// AES-256 decryption: inverse cipher, 14 rounds.
-// Round structure: InvShiftRows -> InvSubBytes -> AddRoundKey -> InvMixColumns
-// Final round omits InvMixColumns. Rounds applied in reverse order.
+// AES-256 decryption: inverse cipher, 14 rounds, same constant-time core.
 void aes256_decrypt_block_sw(Aes256RoundKeys const& rk, span<uint8_t, aes256_block_size> block)
 {
-    State s;
-    state_from_bytes(s, block);
-
-    add_round_key(s, rk.round_keys[aes256_num_rounds]);
-
-    for (size_t r = aes256_num_rounds - 1; r >= 1; --r) {
-        inv_shift_rows(s);
-        inv_sub_bytes(s);
-        add_round_key(s, rk.round_keys[r]);
-        inv_mix_columns(s);
-    }
-
-    // Final round (no InvMixColumns)
-    inv_shift_rows(s);
-    inv_sub_bytes(s);
-    add_round_key(s, rk.round_keys[0]);
-
-    state_to_bytes(s, block);
+    aes_ct_decrypt_block(rk.round_keys, block);
 }
 
 //

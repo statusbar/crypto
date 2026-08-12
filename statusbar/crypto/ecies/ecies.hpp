@@ -13,14 +13,11 @@
 //
 // Cache-Timing Security:
 // The AES-256-CBC-IV0 component uses hardware-accelerated AES when available
-// (AES-NI on x86-64, ARMv8 Crypto Extensions on ARM64), which is constant-time
-// against cache-timing attacks. On platforms WITHOUT hardware AES, the software
-// implementation may be vulnerable to cache-timing side channels (Prime+Probe,
-// Spectre, etc.).
-//
-// Recommendation: Verify your platform supports hardware AES before using ECIES
-// for sensitive key material. For IEEE 1722-2016 key distribution, check CPUID
-// (x86-64) or ID_AA64ISAR0_EL1 register (ARM64) for crypto capability.
+// (AES-NI on x86-64, ARMv8 Crypto Extensions on ARM64) and falls back to a
+// constant-time bitsliced software core (aes_ct_internal.hpp) otherwise —
+// no table lookups or secret-dependent timing on either path. Use
+// crypto_backend_report() (util/crypto_backend.hpp) to observe which path
+// is active.
 //
 // References:
 // - IEEE 1363a-2004 Section 11.3

@@ -6,13 +6,9 @@
 // Cache-Timing Security:
 // This implementation uses hardware-accelerated AES when available (AES-NI on x86-64,
 // ARMv8 Crypto Extensions on ARM64) via the aes256_expand_key_hw(), aes256_encrypt_block_hw(),
-// and aes256_decrypt_block_hw() functions. Hardware acceleration eliminates cache-timing
-// side channels. On platforms without hardware AES support, software fallback is used but
-// is NOT hardened against cache-timing attacks.
-//
-// Recommendation: This function should only be used on platforms with hardware AES
-// acceleration, or in low-security contexts where cache-timing attacks are not a threat.
-// For maximum security, verify CPU support (CPUID on x86-64, FIPS 202 on ARM64).
+// and aes256_decrypt_block_hw() functions. On platforms without hardware AES the fallback is
+// the constant-time bitsliced software core (aes_ct_internal.hpp) — cache-timing safe on
+// every path.
 
 #include "statusbar/crypto/aes_cbc/aes_cbc.hpp"
 

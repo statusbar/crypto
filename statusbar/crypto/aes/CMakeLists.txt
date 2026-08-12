@@ -4,6 +4,7 @@
 target_sources(
   statusbar-crypto
   PRIVATE ${CMAKE_CURRENT_LIST_DIR}/aes_common_internal.cpp
+          ${CMAKE_CURRENT_LIST_DIR}/aes_ct_internal.cpp
           ${CMAKE_CURRENT_LIST_DIR}/aes128.cpp
           ${CMAKE_CURRENT_LIST_DIR}/aes256.cpp)
 
@@ -28,6 +29,7 @@ set_property(
   GLOBAL APPEND
   PROPERTY STATUSBAR_TEST_FILES
            ${CMAKE_CURRENT_LIST_DIR}/aes_common_internal_test.cpp
+           ${CMAKE_CURRENT_LIST_DIR}/aes_ct_internal_test.cpp
            ${CMAKE_CURRENT_LIST_DIR}/aes128_test.cpp
            ${CMAKE_CURRENT_LIST_DIR}/aes256_test.cpp
            ${CMAKE_CURRENT_LIST_DIR}/aes128_hw_test.cpp
