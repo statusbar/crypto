@@ -22,8 +22,8 @@
 // depend only on the CPU and the compile-time feature macros. No environment
 // variable, config file, or other runtime input may influence dispatch; such
 // knobs are downgrade-attack surface (cf. OpenSSL's OPENSSL_ia32cap, which
-// lets anyone who controls the environment mask CPUID bits and force the
-// side-channel-prone software paths). Enforced by the
+// lets anyone who controls the environment mask CPUID bits and silently
+// divert traffic onto the software paths). Enforced by the
 // statusbar_crypto/no_env_knobs ctest and documented in
 // docs/HARDWARE_ACCELERATION.md.
 

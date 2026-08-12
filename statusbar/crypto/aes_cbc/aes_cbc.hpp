@@ -7,20 +7,12 @@
 // Padding always adds 1..16 bytes of padding value equal to the pad length.
 //
 // Cache-Timing Security:
-// This implementation uses hardware-accelerated AES (aes256_expand_key_hw,
-// aes256_encrypt_block_hw, aes256_decrypt_block_hw) which are cache-timing
-// resistant on platforms with AES acceleration:
-//   - x86-64: AES-NI (AESENC/AESDEC instructions have constant-time guarantees)
+// This implementation uses the aes256_*_hw entry points, which are
+// cache-timing resistant on every path:
+//   - x86-64: AES-NI (AESENC/AESDEC have constant-time guarantees)
 //   - ARM64: ARMv8 Crypto Extensions (AESE/AESD also constant-time)
-//
-// On platforms WITHOUT hardware AES support, the backup C++ implementations
-// use S-box table lookups, which may be vulnerable to cache-timing attacks
-// (Prime+Probe, Spectre, etc.) if the attacker can observe cache behavior.
-//
-// Recommendation: For cryptographic operations on untrusted systems or systems
-// with cache-timing threats (shared cloud, untrusted co-tenants, etc.), verify
-// that the platform supports hardware AES before using this function, or use
-// ECIES only for non-sensitive key wrapping operations.
+//   - Software fallback: constant-time bitsliced core (aes_ct_internal.hpp)
+//     with no table lookups and no secret-dependent branches.
 //
 // References:
 // - IEEE 1363a-2004 Section 14.3.2

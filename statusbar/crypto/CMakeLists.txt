@@ -150,7 +150,7 @@ endif()
 
 # SECURITY INVARIANT: crypto dispatch must never be influenced by environment
 # variables (downgrade-attack surface — cf. OpenSSL's OPENSSL_ia32cap, which
-# masks CPUID bits from the environment and forces the side-channel-prone
+# masks CPUID bits from the environment to silently divert traffic onto the
 # software paths). Enforced by grepping every source in this module for getenv:
 # grep exits non-zero when nothing matches, and WILL_FAIL inverts that, so the
 # test PASSES only when no getenv call exists anywhere. When a match is found,

@@ -50,11 +50,14 @@ The `cmac_xorend` variant is the helper RFC 5297 §2.4 needs for AES-SIV's S2V
 construction; tag verification uses `internal::constant_time_equal` over
 fixed-size 16-byte spans.
 
-The shared software state — S-box, inverse S-box, `xtime`, `gf_mul`,
-`ShiftRows` / `MixColumns` etc. — lives in `aes_common_internal.hpp` so the
-AES-128 and AES-256 software encoders share one set of tables. That header
-carries an explicit cache-timing warning: table-based AES is the fallback,
-not the preferred path, and is only reached when no hardware AES is present.
+The software block cipher is a constant-time bitsliced core
+(`aes_ct_internal.hpp` / `.cpp`), shared by AES-128 and AES-256: the block
+lives as eight 16-bit planes, SubBytes is the Boyar–Peralta boolean circuit
+(verified exhaustively against the FIPS 197 tables in
+`aes_ct_internal_test.cpp`), and ShiftRows / MixColumns are fixed bit
+permutations — no S-box tables, no secret-indexed loads, no
+secret-dependent branches anywhere. The shared CMAC helpers (subkey
+derivation, constant-time comparison) remain in `aes_common_internal.hpp`.
 
 The design rationale for offering both key sizes (and when to pick which) is
 documented separately in [`AES128_VS_AES256_REPORT.md`](AES128_VS_AES256_REPORT.md).
@@ -77,7 +80,8 @@ documented separately in [`AES128_VS_AES256_REPORT.md`](AES128_VS_AES256_REPORT.
 - `statusbar/crypto/aes/aes128_hw.hpp` — hardware-accelerated AES-128 (same API, `_hw` suffix) plus the four-block pipelined helper.
 - `statusbar/crypto/aes/aes256.hpp` — software AES-256 block + CMAC; `Aes256RoundKeys`.
 - `statusbar/crypto/aes/aes256_hw.hpp` — hardware-accelerated AES-256.
-- `statusbar/crypto/aes/aes_common_internal.hpp` — internal: S-box tables, `State`, CMAC subkey derivation, templated CMAC cores. Not part of the public API; documented here only because every higher-level CMAC user reaches it via the `_sw` / `_hw` wrappers.
+- `statusbar/crypto/aes/aes_common_internal.hpp` — internal: CMAC subkey derivation, templated CMAC cores, constant-time comparison. Not part of the public API; documented here only because every higher-level CMAC user reaches it via the `_sw` / `_hw` wrappers.
+- `statusbar/crypto/aes/aes_ct_internal.hpp` — internal: the constant-time bitsliced block cipher core (planes, Boyar–Peralta S-box circuit, permutation networks) used by both software implementations.
 
 ## Dependencies
 
@@ -86,7 +90,7 @@ documented separately in [`AES128_VS_AES256_REPORT.md`](AES128_VS_AES256_REPORT.
 
 ## Notes & caveats
 
-- **Hardware-vs-software side channels.** AES-NI and ARMv8 `AESE` / `AESD` are constant-time by construction. The software fallback uses 256-byte S-box lookups and is therefore exposed to cache-timing attacks (Prime+Probe, Flush+Reload, Spectre-class observers). `aes_common_internal.hpp` carries a `@warning` to that effect. Verify hardware AES is available if you care about side channels. On x86-64 the backend does a runtime CPUID probe (AES-NI) and falls back to software when absent; on ARM64 selection is compile-time only (`__ARM_FEATURE_AES`), with no runtime probe — a build with the extension must run only on cores that have it. Neither is surfaced as a public "hardware active" predicate.
+- **Hardware-vs-software side channels.** AES-NI and ARMv8 `AESE` / `AESD` are constant-time by construction, and the software fallback is the constant-time bitsliced core in `aes_ct_internal.hpp` — no table lookups or secret-dependent branches on any path. Backend selection combines the compile-time feature macros with a runtime probe on both architectures (CPUID on x86-64, HWCAP / sysctl on ARM64 — see `util/crypto_cpu.hpp`), and the resolved backend is surfaced publicly via `crypto_backend_report()` in `util/crypto_backend.hpp`.
 - **Round-key lifetime.** `Aes*RoundKeys` is non-copyable, move-only, and zeros its bytes both on destructive move and on destruction. Treat each schedule as bound to one logical key.
 - **CMAC subkey derivation is constant-time.** `cmac_derive_subkeys` masks on the MSB of `L` instead of branching, matching RFC 4493 / SP 800-38B without leaking the top bit.
 - **Tag verification.** `aes*_cmac_verify_*` uses `constant_time_equal` over a fixed 16-byte span; never reach for `std::memcmp` against a tag.

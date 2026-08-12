@@ -13,7 +13,7 @@ callers never need to write platform `#ifdef`s.
 
 | Primitive          | ARM64                                | x86-64                              | SW fallback                         |
 |--------------------|--------------------------------------|-------------------------------------|-------------------------------------|
-| AES-128 block      | ARMv8 Crypto (AESE / AESMC / AESD / AESIMC) | AES-NI (AESENC / AESENCLAST / AESDEC / AESDECLAST) | Constant-time-ish table lookup AES |
+| AES-128 block      | ARMv8 Crypto (AESE / AESMC / AESD / AESIMC) | AES-NI (AESENC / AESENCLAST / AESDEC / AESDECLAST) | Constant-time bitsliced AES (no tables) |
 | AES-256 block      | ARMv8 Crypto (14 rounds)             | AES-NI (14 rounds)                  | Same SW core, 14-round schedule     |
 | AES-128/256 ×4 pipeline | ARMv8 Crypto interleaved        | AES-NI interleaved                  | Four sequential SW block calls      |
 | SHA-256            | ARMv8.0 SHA-2 (SHA256H / SHA256H2 / SHA256SU0 / SHA256SU1) | SHA-NI (SHA256RNDS2 / SHA256MSG1 / SHA256MSG2) | Portable round-loop SW              |
@@ -71,12 +71,13 @@ and no intrinsics. They are the only path on:
 - x86-64 CPUs predating AES-NI (pre-Westmere), SHA-NI (pre-Goldmont /
   pre-Ice Lake client), or PCLMULQDQ (pre-Westmere).
 
-The AES SW path uses S-box table lookups and is **not**
-cache-timing-safe; the headers (`aes_cbc.hpp`, `ecies.hpp`) document
-this and recommend verifying HW support before processing sensitive key
-material on shared-tenant hardware. POLYVAL SW uses shift-and-XOR loops
-that are constant-time in algorithm but not guaranteed so by the
-optimizer.
+The AES SW path is a constant-time bitsliced core
+(`aes/aes_ct_internal.hpp`): the S-box is evaluated as the Boyar–Peralta
+boolean circuit over eight bit planes, so there are no table lookups and
+no secret-dependent branches — cache-timing safe by construction, and
+exhaustively verified against the FIPS 197 tables in its unit test.
+POLYVAL SW uses shift-and-XOR loops that are constant-time in algorithm
+but not guaranteed so by the optimizer.
 
 ## Performance posture
 
@@ -91,13 +92,15 @@ operations keeps the AES unit fed.
 
 ## Downgrade resistance
 
-Because the AES SW fallback is not cache-timing safe, "disable the
-hardware crypto" is an attack, not just a performance regression: a
-hypervisor masking CPUID leaves, a kernel booted with masked hwcaps, a
-container image running under emulation, or a mis-set
-`STATUSBAR_CRYPTO_ARCH_FLAGS` all silently divert secret-key material
-through the leaky table-based path for the lifetime of the deployment.
-Three mechanisms address this:
+Historically the AES SW fallback used table lookups, making "disable the
+hardware crypto" an attack rather than just a performance regression.
+The fallback is now constant-time (see above), which removes the
+side-channel payoff — but a silent downgrade is still a signal that the
+platform is hiding CPU features (a hypervisor masking CPUID leaves, a
+kernel booted with masked hwcaps, a container image running under
+emulation, or a mis-set `STATUSBAR_CRYPTO_ARCH_FLAGS`), and still a
+large silent performance change. Three mechanisms keep it visible and
+controllable:
 
 1. **No override knobs — invariant.** Detection depends only on the CPU
    and the compiled feature macros. There is deliberately no environment

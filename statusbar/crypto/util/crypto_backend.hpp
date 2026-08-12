@@ -5,13 +5,14 @@
 // family resolves to in this process.
 //
 // The *_hw entry points silently fall back to software when the CPU lacks the
-// relevant instructions. That fallback is deliberate for portability, but it
-// must never be *invisible*: a hypervisor masking CPUID, a mis-set
-// STATUSBAR_CRYPTO_ARCH_FLAGS, or a container running under emulation all
-// silently downgrade AES to the table-based software path, which is not
-// cache-timing safe. Long-running daemons should log
-// crypto_backend_summary() once at startup so a downgrade shows up as a
-// one-line anomaly instead of going unnoticed for the life of the deployment.
+// relevant instructions. The software AES fallback is a constant-time
+// bitsliced core (aes/aes_ct_internal.hpp), so a downgrade no longer opens a
+// cache-timing side channel — but it is still a large performance change and
+// a signal that the platform is hiding CPU features (hypervisor masking
+// CPUID, mis-set STATUSBAR_CRYPTO_ARCH_FLAGS, emulation), so it must never
+// be *invisible*. Long-running daemons should log crypto_backend_summary()
+// once at startup so a downgrade shows up as a one-line anomaly instead of
+// going unnoticed for the life of the deployment.
 //
 // See docs/HARDWARE_ACCELERATION.md ("Downgrade resistance") and
 // STATUSBAR_CRYPTO_REQUIRE_HW for the fail-closed alternative.
