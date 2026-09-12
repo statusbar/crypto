@@ -7,11 +7,22 @@
 // Two layers per primitive family:
 //
 //  - cpu_*_hw_probe(): the raw answer — true iff the accelerated code path
-//    was compiled in (arch feature macros from STATUSBAR_CRYPTO_ARCH_FLAGS)
-//    AND the running CPU implements the instructions (CPUID on x86-64,
-//    HWCAP / sysctl via crypto_cpu_arm.hpp on aarch64). Never aborts; this
-//    is what crypto_backend_report() uses, so a report can be produced even
-//    on a machine where the policy below would refuse to run.
+//    was compiled into statusbar-crypto (arch feature macros from
+//    STATUSBAR_CRYPTO_ARCH_FLAGS) AND the running CPU implements the
+//    instructions (CPUID on x86-64, HWCAP / sysctl via crypto_cpu_arm.hpp on
+//    aarch64). Never aborts; this is what crypto_backend_report() uses, so a
+//    report can be produced even on a machine where the policy below would
+//    refuse to run.
+//
+//    These are declared here but DEFINED OUT-OF-LINE in crypto_backend.cpp,
+//    on purpose. STATUSBAR_CRYPTO_ARCH_FLAGS is PRIVATE to the
+//    statusbar-crypto target, so the feature macros that select a probe body
+//    are defined only while compiling that target's own sources. An inline
+//    definition therefore compiled to the real probe inside the library and
+//    to a constant `false` in every other TU that included this header — an
+//    ODR violation, and the reason crypto_backend_report() could disagree
+//    with a caller's own call to the very probe that produced it. One
+//    definition, compiled once, with the arch flags: everyone agrees.
 //
 //  - cpu_*_hw_active(): what the dispatchers call. Identical to the probe
 //    unless the build defines STATUSBAR_CRYPTO_REQUIRE_HW, in which case a
@@ -28,12 +39,6 @@
 // docs/HARDWARE_ACCELERATION.md.
 
 #pragma once
-
-#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
-
-#if defined(__x86_64__) && (defined(__AES__) || defined(__SHA__) || defined(__PCLMUL__))
-#    include <cpuid.h>
-#endif
 
 // Fail closed at build time: if the policy is "hardware or nothing", a build
 // whose arch flags don't even compile the hardware paths can never satisfy it.
@@ -58,41 +63,13 @@ namespace statusbar::crypto::internal {
 
 /// True iff the AES hardware path (AES-NI / FEAT_AES) is compiled in and the
 /// running CPU implements it. Covers AES-128/256 block, x4 pipeline, and CMAC.
-inline auto cpu_aes_hw_probe() -> bool
-{
-#if defined(__x86_64__) && defined(__AES__)
-    // CPUID leaf 1, ECX bit 25 = AES-NI. Probed once, cached.
-    static bool const has = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid(1, eax, ebx, ecx, edx);
-        return (ecx & (1u << 25)) != 0;
-    }();
-    return has;
-#elif defined(__aarch64__) && defined(__ARM_FEATURE_AES)
-    return arm_has_aes();
-#else
-    return false;
-#endif
-}
+/// Defined in crypto_backend.cpp — see the ODR note at the top of this file.
+auto cpu_aes_hw_probe() -> bool;
 
 /// True iff the SHA-256 hardware path (SHA-NI / FEAT_SHA256) is compiled in
 /// and the running CPU implements it.
-inline auto cpu_sha256_hw_probe() -> bool
-{
-#if defined(__x86_64__) && defined(__SHA__)
-    // CPUID leaf 7, subleaf 0, EBX bit 29 = SHA-NI. Probed once, cached.
-    static bool const has = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid_count(7, 0, eax, ebx, ecx, edx);
-        return (ebx & (1u << 29)) != 0;
-    }();
-    return has;
-#elif defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
-    return arm_has_sha2();
-#else
-    return false;
-#endif
-}
+/// Defined in crypto_backend.cpp — see the ODR note at the top of this file.
+auto cpu_sha256_hw_probe() -> bool;
 
 /// SHA-512 has no active hardware backend yet: the ARMv8.2 SHA-512 code is
 /// pending validation and x86-64 has no SHA-512 ISA, so both _hw files
@@ -106,24 +83,8 @@ constexpr auto cpu_sha512_hw_probe() -> bool
 
 /// True iff the POLYVAL carry-less-multiply hardware path (PCLMULQDQ /
 /// FEAT_PMULL) is compiled in and the running CPU implements it.
-inline auto cpu_polyval_hw_probe() -> bool
-{
-#if defined(__x86_64__) && defined(__PCLMUL__)
-    // CPUID leaf 1, ECX bit 1 = PCLMULQDQ. Probed once, cached.
-    static bool const has = [] {
-        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-        __cpuid(1, eax, ebx, ecx, edx);
-        return (ecx & (1u << 1)) != 0;
-    }();
-    return has;
-#elif defined(__aarch64__) && defined(__ARM_FEATURE_AES)
-    // PMULL/PMULL2 are part of the ARMv8 AES feature set, but Linux reports
-    // them as a distinct hwcap — check the PMULL bit, not the AES bit.
-    return arm_has_pmull();
-#else
-    return false;
-#endif
-}
+/// Defined in crypto_backend.cpp — see the ODR note at the top of this file.
+auto cpu_polyval_hw_probe() -> bool;
 
 inline auto cpu_aes_hw_active() -> bool
 {

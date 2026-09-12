@@ -4,6 +4,11 @@
 #include "statusbar/crypto/util/crypto_backend.hpp"
 
 #include "statusbar/crypto/util/crypto_cpu.hpp"
+#include "statusbar/crypto/util/crypto_cpu_arm.hpp"
+
+#if defined(__x86_64__) && (defined(__AES__) || defined(__SHA__) || defined(__PCLMUL__))
+#    include <cpuid.h>
+#endif
 
 #include <array>
 #include <cstdlib>
@@ -22,6 +27,66 @@ void require_hw_violation(char const* primitive) noexcept
         "was configured with STATUSBAR_CRYPTO_REQUIRE_HW (software fallback not permitted)",
         primitive);
     std::abort();
+}
+
+// The probes live here, out of line, rather than inline in crypto_cpu.hpp:
+// this TU belongs to statusbar-crypto and so is compiled with
+// STATUSBAR_CRYPTO_ARCH_FLAGS, which is what defines the feature macros below.
+// Those flags are PRIVATE to the target, so an inline body would select the
+// real probe here and a constant `false` in any other TU including the header.
+// See the ODR note at the top of crypto_cpu.hpp.
+
+auto cpu_aes_hw_probe() -> bool
+{
+#if defined(__x86_64__) && defined(__AES__)
+    // CPUID leaf 1, ECX bit 25 = AES-NI. Probed once, cached.
+    static bool const has = [] {
+        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+        __cpuid(1, eax, ebx, ecx, edx);
+        return (ecx & (1u << 25)) != 0;
+    }();
+    return has;
+#elif defined(__aarch64__) && defined(__ARM_FEATURE_AES)
+    return arm_has_aes();
+#else
+    return false;
+#endif
+}
+
+auto cpu_sha256_hw_probe() -> bool
+{
+#if defined(__x86_64__) && defined(__SHA__)
+    // CPUID leaf 7, subleaf 0, EBX bit 29 = SHA-NI. Probed once, cached.
+    static bool const has = [] {
+        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+        __cpuid_count(7, 0, eax, ebx, ecx, edx);
+        return (ebx & (1u << 29)) != 0;
+    }();
+    return has;
+#elif defined(__aarch64__) && defined(__ARM_FEATURE_SHA2)
+    return arm_has_sha2();
+#else
+    return false;
+#endif
+}
+
+auto cpu_polyval_hw_probe() -> bool
+{
+#if defined(__x86_64__) && defined(__PCLMUL__)
+    // CPUID leaf 1, ECX bit 1 = PCLMULQDQ. Probed once, cached.
+    static bool const has = [] {
+        unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
+        __cpuid(1, eax, ebx, ecx, edx);
+        return (ecx & (1u << 1)) != 0;
+    }();
+    return has;
+#elif defined(__aarch64__) && defined(__ARM_FEATURE_AES)
+    // PMULL/PMULL2 are part of the ARMv8 AES feature set, but Linux reports
+    // them as a distinct hwcap — check the PMULL bit, not the AES bit.
+    return arm_has_pmull();
+#else
+    return false;
+#endif
 }
 
 }  // namespace internal
