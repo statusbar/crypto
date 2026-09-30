@@ -45,82 +45,17 @@ endif()
 # packages find_package() them as statusbar::<module>.
 set_target_properties(statusbar-crypto PROPERTIES EXPORT_NAME crypto)
 
-# Give every installed executable a statusbar- prefixed on-disk name, so the
-# bin/ directory is uniform (tools that set no OUTPUT_NAME, and examples, would
-# otherwise install unprefixed).
-get_property(_exe_targets GLOBAL PROPERTY STATUSBAR_INSTALL_TARGETS)
-foreach(_t ${_exe_targets})
-  if(NOT TARGET ${_t})
-    continue()
-  endif()
-  get_target_property(_t_type ${_t} TYPE)
-  if(NOT _t_type STREQUAL "EXECUTABLE")
-    continue()
-  endif()
-  get_target_property(_t_name ${_t} OUTPUT_NAME)
-  if(NOT _t_name)
-    set(_t_name "${_t}")
-  endif()
-  if(NOT _t_name MATCHES "^statusbar-")
-    string(REPLACE "_" "-" _t_name "${_t_name}")
-    set_target_properties(${_t} PROPERTIES OUTPUT_NAME "statusbar-${_t_name}")
-  endif()
-endforeach()
+# Uniform statusbar- prefixed on-disk names for installed executables
+# (statusbar_prefix_tool_names in cmake/module.cmake).
+statusbar_prefix_tool_names()
 
 # ---- install + export ----
-# Skipped under the outer aggregate build, which builds, not installs. Install
-# rules are split into runtime (tools / shared libs) and devel (static libs,
-# headers, CMake config) components for CPack.
+# Standalone install/export boilerplate lives in
+# statusbar_package_install_export (cmake/module.cmake); no-op under an outer
+# aggregate build.
+statusbar_package_install_export(NAME crypto)
+
 if(NOT STATUSBAR_AGGREGATE_BUILD)
-  get_property(_install_targets GLOBAL PROPERTY STATUSBAR_INSTALL_TARGETS)
-  install(
-    TARGETS ${_install_targets}
-    EXPORT statusbar-cryptoTargets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT devel
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime)
-  install(
-    EXPORT statusbar-cryptoTargets
-    FILE statusbar-cryptoTargets.cmake
-    NAMESPACE statusbar::
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/statusbar-crypto
-    COMPONENT devel)
-  # Also export the build tree, so a sibling package can find this one without
-  # an install step: pass -Dstatusbar-crypto_DIR=<build-dir>.
-  export(
-    EXPORT statusbar-cryptoTargets
-    FILE statusbar-cryptoTargets.cmake
-    NAMESPACE statusbar::)
-  install(
-    DIRECTORY statusbar/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/statusbar
-    COMPONENT devel
-    FILES_MATCHING
-    PATTERN "*.hpp"
-    PATTERN "*.h")
-  configure_package_config_file(
-    cmake/statusbar-cryptoConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/statusbar-cryptoConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/statusbar-crypto)
-  write_basic_package_version_file(
-    ${CMAKE_CURRENT_BINARY_DIR}/statusbar-cryptoConfigVersion.cmake
-    VERSION ${PROJECT_VERSION}
-    COMPATIBILITY AnyNewerVersion)
-  install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/statusbar-cryptoConfig.cmake
-          ${CMAKE_CURRENT_BINARY_DIR}/statusbar-cryptoConfigVersion.cmake
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/statusbar-crypto
-    COMPONENT devel)
-  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/docs)
-    install(
-      DIRECTORY docs/
-      DESTINATION ${CMAKE_INSTALL_DOCDIR}
-      COMPONENT devel
-      FILES_MATCHING
-      PATTERN "*.md"
-      PATTERN "*.svg"
-      PATTERN "*.png")
-  endif()
 
   # ---- Python helpers (runtime component) ----
   # statusbar_crypto.py is the flat library mirroring the C++ API; install it as
@@ -152,36 +87,12 @@ endif()
 # Standalone builds only — run `cpack` from the build directory to produce this
 # package's archives.
 if(NOT STATUSBAR_AGGREGATE_BUILD)
-  set(CPACK_PACKAGE_NAME "statusbar-crypto")
-  set(CPACK_PACKAGE_VENDOR "Jeff Koftinoff")
-  set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-      "Cryptography toolkit — AES (block, CBC, GCM-SIV, SIV, CMAC), SHA-2, POLYVAL, HKDF/KDF2, Curve25519 (X25519/Ed25519) and NIST P-256 (ECDH/ECDSA), ECIES, and PKCS#8."
+  statusbar_package_cpack_defaults(
+    NAME
+    crypto
+    DESCRIPTION
+    "Cryptography toolkit — AES (block, CBC, GCM-SIV, SIV, CMAC), SHA-2, POLYVAL, HKDF/KDF2, Curve25519 (X25519/Ed25519) and NIST P-256 (ECDH/ECDSA), ECIES, and PKCS#8."
   )
-  set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}")
-  set(CPACK_DEBIAN_PACKAGE_MAINTAINER
-      "Jeff Koftinoff <jeff.koftinoff@statusbar.com>")
-  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-  set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-  set(CPACK_RPM_PACKAGE_GROUP "Development/Libraries")
-  set(CPACK_RPM_PACKAGE_AUTOREQ ON)
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
-  endif()
-  set(CPACK_DEB_COMPONENT_INSTALL ON)
-  set(CPACK_RPM_COMPONENT_INSTALL ON)
-  set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
-  # Name DEB/RPM files the package-manager-conventional way
-  # (<name>_<version>_<arch>.deb), so dependent builds and the orchestrator
-  # locate them by package name.
-  set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
-  set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
-  set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "statusbar-crypto")
-  set(CPACK_RPM_RUNTIME_PACKAGE_NAME "statusbar-crypto")
-  set(CPACK_COMPONENT_RUNTIME_DESCRIPTION "Command-line tools and executables")
-  set(CPACK_COMPONENTS_ALL runtime devel)
-  set(CPACK_DEBIAN_DEVEL_PACKAGE_NAME "statusbar-crypto-dev")
-  set(CPACK_RPM_DEVEL_PACKAGE_NAME "statusbar-crypto-devel")
   # Python runtime deps. Auto-shlibdeps still runs and adds C++ runtime libs.
   set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
       "python3, python3-cryptography (>= 43.0), python3-pycryptodome (>= 3.20)")
@@ -197,14 +108,6 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
       "statusbar-core-devel >= ${statusbar-core_VERSION}")
   set(CPACK_COMPONENT_DEVEL_DESCRIPTION
       "C++ headers, static libraries and CMake package config")
-  set(CPACK_GENERATOR "TGZ;ZIP")
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    list(APPEND CPACK_GENERATOR "DEB")
-    find_program(_rpmbuild rpmbuild)
-    if(_rpmbuild)
-      list(APPEND CPACK_GENERATOR "RPM")
-    endif()
-  endif()
   include(CPack)
 endif()
 
