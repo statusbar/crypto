@@ -60,20 +60,21 @@ if(NOT STATUSBAR_AGGREGATE_BUILD)
   # ---- Python helpers (runtime component) ----
   # statusbar_crypto.py is the flat library mirroring the C++ API; install it as
   # the package's __init__.py so `import statusbar_crypto as sc` works
-  # regardless of the in-tree flat-script layout. Absolute path: dist-packages
-  # is outside CMAKE_INSTALL_PREFIX (which is typically /usr/local) but Python
-  # only scans /usr/lib/python3/dist-packages by default.
+  # regardless of the in-tree flat-script layout. The destination defaults to
+  # the absolute /usr/lib/python3/dist-packages, the only directory Debian's
+  # python3 scans, outside CMAKE_INSTALL_PREFIX; archive builds relocate it
+  # under the prefix (STATUSBAR_PYTHON_DIST_PACKAGES in core's module.cmake).
   if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/python/crypto/statusbar_crypto.py)
     install(
       FILES python/crypto/statusbar_crypto.py
-      DESTINATION /usr/lib/python3/dist-packages/statusbar_crypto
+      DESTINATION ${STATUSBAR_PYTHON_DIST_PACKAGES}/statusbar_crypto
       RENAME __init__.py
       COMPONENT runtime)
     install(
       FILES python/crypto/avtp_crypto_vectors.py
             python/crypto/avtp_crypto_cross_check.py
             python/crypto/statusbar_crypto_test.py
-      DESTINATION /usr/lib/python3/dist-packages/statusbar_crypto
+      DESTINATION ${STATUSBAR_PYTHON_DIST_PACKAGES}/statusbar_crypto
       COMPONENT runtime)
     install(
       PROGRAMS python/crypto/avtp_crypto_cross_check.py
