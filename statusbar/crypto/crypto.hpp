@@ -12,6 +12,8 @@
 #include "statusbar/crypto/aes/aes256_hw.hpp"
 #include "statusbar/crypto/aes/aes_common_internal.hpp"
 #include "statusbar/crypto/aes_cbc/aes_cbc.hpp"
+#include "statusbar/crypto/aes_gcm/aes128_gcm.hpp"
+#include "statusbar/crypto/aes_gcm/aes256_gcm.hpp"
 #include "statusbar/crypto/aes_gcm_siv/aes128_gcm_siv.hpp"
 #include "statusbar/crypto/aes_gcm_siv/aes256_gcm_siv.hpp"
 #include "statusbar/crypto/aes_siv/aes128_siv.hpp"

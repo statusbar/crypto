@@ -489,6 +489,47 @@ class TestAesSiv(unittest.TestCase):
 
 
 # ===================================================================
+# 9b. AES-GCM (NIST SP 800-38D)
+# ===================================================================
+
+
+class TestAesGcm(unittest.TestCase):
+    # McGrew & Viega GCM test cases 2 and 14 (K = 0, IV = 0, P = one zero block)
+    def test_aes128_gcm_spec_case_2(self):
+        key = sc.Aes128Key(data=bytes(16))
+        tag, ct = sc.aes128_gcm_encrypt(key, bytes(12), bytes(16), b"")
+        self.assertEqual(ct.hex(), "0388dace60b6a392f328c2b971b2fe78")
+        self.assertEqual(tag.hex(), "ab6e47d42cec13bdf53a67b21257bddf")
+
+    def test_aes256_gcm_spec_case_14(self):
+        key = sc.Aes256Key(data=bytes(32))
+        tag, ct = sc.aes256_gcm_encrypt(key, bytes(12), bytes(16), b"")
+        self.assertEqual(ct.hex(), "cea7403d4d606b6e074ec5d3baf39d18")
+        self.assertEqual(tag.hex(), "d0d1c8a799996bf0265b98b5d48ab919")
+
+    def test_aes128_gcm_roundtrip_with_aad(self):
+        key = sc.Aes128Key(data=bytes(range(16)))
+        nonce = bytes(range(12))
+        tag, ct = sc.aes128_gcm_encrypt(key, nonce, b"hello gcm", b"aad")
+        ok, dec = sc.aes128_gcm_decrypt(key, nonce, ct, tag, b"aad")
+        self.assertTrue(ok)
+        self.assertEqual(dec, b"hello gcm")
+        ok, dec = sc.aes128_gcm_decrypt(key, nonce, ct, tag, b"xad")
+        self.assertFalse(ok)
+        self.assertEqual(dec, bytes(len(ct)))
+
+    def test_aes256_gcm_tampered_tag(self):
+        key = sc.Aes256Key(data=bytes(32))
+        nonce = bytes(12)
+        tag, ct = sc.aes256_gcm_encrypt(key, nonce, b"test data here!", b"")
+        bad = bytearray(tag)
+        bad[0] ^= 0xFF
+        ok, dec = sc.aes256_gcm_decrypt(key, nonce, ct, bytes(bad), b"")
+        self.assertFalse(ok)
+        self.assertEqual(dec, bytes(len(ct)))
+
+
+# ===================================================================
 # 10. AES-GCM-SIV
 # ===================================================================
 

@@ -15,6 +15,7 @@ two-minute orientation, then dive into its headers under
 |--------------|-------------------------------------------------------------------------------------|--------------------------------------------|
 | aes          | AES-128 / AES-256 block cipher and AES-CMAC with SW + HW implementations.           | [AES_MODULE.md](AES_MODULE.md)             |
 | aes_cbc      | AES-256-CBC with a null IV and PKCS#7 padding (IEEE 1363a-2004 §14.3.2).            | [AES_CBC_MODULE.md](AES_CBC_MODULE.md)     |
+| aes_gcm      | AES-128 / AES-256 GCM AEAD, 96-bit nonce (NIST SP 800-38D, RFC 5116).               | [AES_GCM_MODULE.md](AES_GCM_MODULE.md)     |
 | aes_gcm_siv  | AES-128 / AES-256 GCM-SIV nonce-misuse-resistant AEAD (RFC 8452).                   | [AES_GCM_SIV_MODULE.md](AES_GCM_SIV_MODULE.md) |
 | aes_siv      | AES-128 / AES-256 SIV deterministic authenticated encryption (RFC 5297).            | [AES_SIV_MODULE.md](AES_SIV_MODULE.md)     |
 | sha          | SHA-256 / SHA-512 hashes and HMAC-SHA-256 (FIPS 180-4, RFC 2104).                   | [SHA_MODULE.md](SHA_MODULE.md)             |

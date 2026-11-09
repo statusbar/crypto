@@ -29,6 +29,8 @@ aes128_block_size = 16
 aes256_block_size = 16
 aes128_siv_key_size = 32
 aes256_siv_key_size = 64
+aes_gcm_nonce_size = 12
+aes_gcm_tag_size = 16
 aes_gcm_siv_nonce_size = 12
 aes_gcm_siv_tag_size = 16
 ed25519_public_key_size = 32
@@ -493,6 +495,63 @@ def aes256_siv_decrypt(
         return (True, plaintext)
     except (InvalidTag, ValueError):
         return (False, bytes(len(ciphertext)))
+
+
+#
+# AES-128-GCM / AES-256-GCM (NIST SP 800-38D; RFC 5116 AEAD_AES_128_GCM / AEAD_AES_256_GCM)
+#
+
+
+def _aes_gcm_encrypt(
+    key_bytes: bytes, nonce: bytes, plaintext: bytes, aad: bytes
+) -> tuple[bytes, bytes]:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    _check_size("nonce", nonce, aes_gcm_nonce_size)
+    ct = AESGCM(key_bytes).encrypt(nonce, plaintext, aad or None)
+    return (ct[-aes_gcm_tag_size:], ct[:-aes_gcm_tag_size])
+
+
+def _aes_gcm_decrypt(
+    key_bytes: bytes, nonce: bytes, ciphertext: bytes, tag: bytes, aad: bytes
+) -> tuple[bool, bytes]:
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    try:
+        _check_size("nonce", nonce, aes_gcm_nonce_size)
+        _check_size("tag", tag, aes_gcm_tag_size)
+        return (True, AESGCM(key_bytes).decrypt(nonce, ciphertext + tag, aad or None))
+    except (InvalidTag, ValueError):
+        return (False, bytes(len(ciphertext)))
+
+
+def aes128_gcm_encrypt(
+    key: Aes128Key, nonce: bytes, plaintext: bytes, aad: bytes
+) -> tuple[bytes, bytes]:
+    """AES-128-GCM encrypt (SP 800-38D), 96-bit nonce. Returns (tag, ciphertext)."""
+    return _aes_gcm_encrypt(key.data, nonce, plaintext, aad)
+
+
+def aes128_gcm_decrypt(
+    key: Aes128Key, nonce: bytes, ciphertext: bytes, tag: bytes, aad: bytes
+) -> tuple[bool, bytes]:
+    """AES-128-GCM decrypt. Returns (ok, plaintext); (False, zeros) on a bad tag."""
+    return _aes_gcm_decrypt(key.data, nonce, ciphertext, tag, aad)
+
+
+def aes256_gcm_encrypt(
+    key: Aes256Key, nonce: bytes, plaintext: bytes, aad: bytes
+) -> tuple[bytes, bytes]:
+    """AES-256-GCM encrypt (SP 800-38D), 96-bit nonce. Returns (tag, ciphertext)."""
+    return _aes_gcm_encrypt(key.data, nonce, plaintext, aad)
+
+
+def aes256_gcm_decrypt(
+    key: Aes256Key, nonce: bytes, ciphertext: bytes, tag: bytes, aad: bytes
+) -> tuple[bool, bytes]:
+    """AES-256-GCM decrypt. Returns (ok, plaintext); (False, zeros) on a bad tag."""
+    return _aes_gcm_decrypt(key.data, nonce, ciphertext, tag, aad)
 
 
 #

@@ -16,8 +16,11 @@ authenticate the actual payload with that symmetric key. Decryption
 runs the same ECDH from the other side and verifies before
 decrypting.
 
-This module ships two concrete profiles, both producing
-`V || C || T` on the wire (ephemeral public key, ciphertext, MAC tag):
+This module ships two concrete profiles, both producing the IEEE 1363a
+triple `V || C || T` (ephemeral public key, ciphertext, MAC tag). IEEE
+1722-2025 17.3.2 lays the ECC1 `encrypted_payload` out as `V || T || C`;
+that reorder belongs to the framing layer (statusbar-avb's
+`eecf_ecc1_encrypt` / `eecf_ecc1_decrypt`), not to this module.
 
 | Flavor              | Curve  | ECDH      | KDF           | AEAD              | MAC          | V size | T size |
 |---------------------|--------|-----------|---------------|-------------------|--------------|--------|--------|
