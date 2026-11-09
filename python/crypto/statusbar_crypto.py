@@ -1003,28 +1003,31 @@ def p256_ecdh(sk: P256PrivateKey, peer_pk: P256PublicKey) -> bytes:
 # DL/ECIES (IEEE 1363a-2004 / IEEE 1722-2016 clause 17)
 
 #
-# HPKE (RFC 9180): DHKEM(P-256, HKDF-SHA256) 0x0010 / HKDF-SHA256 0x0001 /
-# AES-128-GCM 0x0001 or AES-256-GCM 0x0002, base mode. Mirrors
-# statusbar/crypto/hpke/hpke.hpp on top of the cryptography package.
+# HPKE (RFC 9180): DHKEM(P-256, HKDF-SHA256) 0x0010 or DHKEM(X25519, HKDF-SHA256)
+# 0x0020 / HKDF-SHA256 0x0001 / AES-128-GCM 0x0001 or AES-256-GCM 0x0002, base
+# mode. Mirrors statusbar/crypto/hpke/hpke.hpp on top of the cryptography
+# package; the recipient key's type picks the KEM, as the C++ overloads do.
 #
 
-hpke_kem_id = 0x0010
+hpke_p256_kem_id = 0x0010
+hpke_x25519_kem_id = 0x0020
 hpke_kdf_id = 0x0001
 hpke_aead_aes128_gcm = 0x0001
 hpke_aead_aes256_gcm = 0x0002
 hpke_p256_public_key_size = 65
+hpke_x25519_public_key_size = 32
 hpke_nonce_size = 12
 hpke_tag_size = 16
 hpke_hash_size = 32
 hpke_min_ikm_size = 32
 _HPKE_VERSION = b"HPKE-v1"
-_HPKE_KEM_SUITE_ID = b"KEM" + hpke_kem_id.to_bytes(2, "big")
 
 
 @dataclass
 class HpkeContext:
     """One side's HPKE context (RFC 9180 5.1): key schedule output and sequence number."""
 
+    kem_id: int
     aead_id: int
     key: bytes
     base_nonce: bytes
@@ -1036,10 +1039,23 @@ def hpke_aead_key_size(aead_id: int) -> int:
     return 16 if aead_id == hpke_aead_aes128_gcm else 32
 
 
-def _hpke_suite_id(aead_id: int) -> bytes:
+def hpke_kem_public_key_size(kem_id: int) -> int:
+    """Npk (= Nenc) of a KEM."""
+    return (
+        hpke_p256_public_key_size
+        if kem_id == hpke_p256_kem_id
+        else hpke_x25519_public_key_size
+    )
+
+
+def _hpke_kem_suite_id(kem_id: int) -> bytes:
+    return b"KEM" + kem_id.to_bytes(2, "big")
+
+
+def _hpke_suite_id(kem_id: int, aead_id: int) -> bytes:
     return (
         b"HPKE"
-        + hpke_kem_id.to_bytes(2, "big")
+        + kem_id.to_bytes(2, "big")
         + hpke_kdf_id.to_bytes(2, "big")
         + aead_id.to_bytes(2, "big")
     )
@@ -1069,10 +1085,11 @@ def hpke_p256_derive_key_pair(ikm: bytes) -> P256PrivateKey:
     """DeriveKeyPair for DHKEM(P-256, HKDF-SHA256) (RFC 9180 7.1.3)."""
     if len(ikm) < hpke_min_ikm_size:
         raise ValueError(f"HPKE ikm too short: {len(ikm)} < {hpke_min_ikm_size}")
-    dkp_prk = _hpke_labeled_extract(_HPKE_KEM_SUITE_ID, b"", b"dkp_prk", ikm)
+    suite = _hpke_kem_suite_id(hpke_p256_kem_id)
+    dkp_prk = _hpke_labeled_extract(suite, b"", b"dkp_prk", ikm)
     for counter in range(256):
         candidate = _hpke_labeled_expand(
-            _HPKE_KEM_SUITE_ID, dkp_prk, b"candidate", bytes([counter]), 32
+            suite, dkp_prk, b"candidate", bytes([counter]), 32
         )
         key_pair = p256_keypair_from_scalar(
             candidate
@@ -1104,14 +1121,68 @@ def hpke_p256_deserialize_public_key(encoded: bytes) -> P256PublicKey:
     return P256PublicKey(data=encoded[1:])
 
 
-def _hpke_extract_and_expand(dh: bytes, kem_context: bytes) -> bytes:
-    eae_prk = _hpke_labeled_extract(_HPKE_KEM_SUITE_ID, b"", b"eae_prk", dh)
+def hpke_x25519_derive_key_pair(ikm: bytes) -> X25519PrivateKey:
+    """DeriveKeyPair for DHKEM(X25519, HKDF-SHA256) (RFC 9180 7.1.3).
+
+    sk = LabeledExpand(LabeledExtract("", "dkp_prk", ikm), "sk", "", 32), kept as
+    the raw 32 bytes (X25519 clamps when it multiplies), so the RFC's skXm
+    vectors are reproduced byte for byte.
+    """
+    if len(ikm) < hpke_min_ikm_size:
+        raise ValueError(f"HPKE ikm too short: {len(ikm)} < {hpke_min_ikm_size}")
+    suite = _hpke_kem_suite_id(hpke_x25519_kem_id)
+    dkp_prk = _hpke_labeled_extract(suite, b"", b"dkp_prk", ikm)
+    return x25519_keypair_from_seed(
+        _hpke_labeled_expand(suite, dkp_prk, b"sk", b"", x25519_private_key_size)
+    )
+
+
+def hpke_x25519_serialize_public_key(pk: X25519PublicKey) -> bytes:
+    """SerializePublicKey (RFC 9180 7.1.1): the 32-byte u-coordinate."""
+    return pk.data
+
+
+def hpke_x25519_deserialize_public_key(encoded: bytes) -> X25519PublicKey:
+    """DeserializePublicKey: the 32 bytes as given (a small-order point fails at DH time, 7.1.4)."""
+    if len(encoded) != hpke_x25519_public_key_size:
+        raise ValueError("HPKE X25519 public key: not 32 bytes")
+    return X25519PublicKey(data=encoded)
+
+
+def _hpke_dh(sk, pk) -> bytes:
+    """DH(sk, pk) for either KEM; ValueError on an all-zero result (RFC 9180 7.1.4)."""
+    if isinstance(sk, X25519PrivateKey):
+        shared = x25519(sk, pk)
+        if not x25519_shared_secret_is_valid(shared):
+            raise ValueError("HPKE X25519: small-order public key")
+        return shared
+    return p256_ecdh(sk, pk)
+
+
+def _hpke_kem_id_of(key) -> int:
+    return (
+        hpke_x25519_kem_id
+        if isinstance(key, (X25519PrivateKey, X25519PublicKey))
+        else hpke_p256_kem_id
+    )
+
+
+def _hpke_serialize(pk) -> bytes:
+    if isinstance(pk, X25519PublicKey):
+        return hpke_x25519_serialize_public_key(pk)
+    return hpke_p256_serialize_public_key(pk)
+
+
+def _hpke_extract_and_expand(kem_id: int, dh: bytes, kem_context: bytes) -> bytes:
+    suite = _hpke_kem_suite_id(kem_id)
+    eae_prk = _hpke_labeled_extract(suite, b"", b"eae_prk", dh)
     return _hpke_labeled_expand(
-        _HPKE_KEM_SUITE_ID, eae_prk, b"shared_secret", kem_context, hpke_hash_size
+        suite, eae_prk, b"shared_secret", kem_context, hpke_hash_size
     )
 
 
 def _hpke_key_schedule(
+    kem_id: int,
     mode: int,
     aead_id: int,
     shared_secret: bytes,
@@ -1119,12 +1190,13 @@ def _hpke_key_schedule(
     psk: bytes,
     psk_id: bytes,
 ) -> HpkeContext:
-    suite_id = _hpke_suite_id(aead_id)
+    suite_id = _hpke_suite_id(kem_id, aead_id)
     psk_id_hash = _hpke_labeled_extract(suite_id, b"", b"psk_id_hash", psk_id)
     info_hash = _hpke_labeled_extract(suite_id, b"", b"info_hash", info)
     key_schedule_context = bytes([mode]) + psk_id_hash + info_hash
     secret = _hpke_labeled_extract(suite_id, shared_secret, b"secret", psk)
     return HpkeContext(
+        kem_id=kem_id,
         aead_id=aead_id,
         key=_hpke_labeled_expand(
             suite_id, secret, b"key", key_schedule_context, hpke_aead_key_size(aead_id)
@@ -1139,24 +1211,33 @@ def _hpke_key_schedule(
 
 
 def hpke_setup_base_s(
-    aead_id: int, pk_r: P256PublicKey, info: bytes, ikm_e: bytes
+    aead_id: int, pk_r, info: bytes, ikm_e: bytes
 ) -> tuple[bytes, HpkeContext]:
-    """SetupBaseS (RFC 9180 5.1.1) with the ephemeral key DeriveKeyPair(ikm_e). Returns (enc, context)."""
-    sk_e = hpke_p256_derive_key_pair(ikm_e)
-    enc = hpke_p256_serialize_public_key(sk_e.public_key)
-    kem_context = enc + hpke_p256_serialize_public_key(pk_r)
-    shared_secret = _hpke_extract_and_expand(p256_ecdh(sk_e, pk_r), kem_context)
-    return enc, _hpke_key_schedule(0, aead_id, shared_secret, info, b"", b"")
+    """SetupBaseS (RFC 9180 5.1.1) with the ephemeral key DeriveKeyPair(ikm_e). Returns (enc, context).
+
+    pk_r is a P256PublicKey (DHKEM(P-256)) or an X25519PublicKey (DHKEM(X25519)).
+    """
+    kem_id = _hpke_kem_id_of(pk_r)
+    if kem_id == hpke_x25519_kem_id:
+        sk_e = hpke_x25519_derive_key_pair(ikm_e)
+    else:
+        sk_e = hpke_p256_derive_key_pair(ikm_e)
+    enc = _hpke_serialize(sk_e.public_key)
+    kem_context = enc + _hpke_serialize(pk_r)
+    shared_secret = _hpke_extract_and_expand(kem_id, _hpke_dh(sk_e, pk_r), kem_context)
+    return enc, _hpke_key_schedule(kem_id, 0, aead_id, shared_secret, info, b"", b"")
 
 
-def hpke_setup_base_r(
-    aead_id: int, enc: bytes, sk_r: P256PrivateKey, info: bytes
-) -> HpkeContext:
-    """SetupBaseR (RFC 9180 5.1.1)."""
-    pk_e = hpke_p256_deserialize_public_key(enc)
-    kem_context = enc + hpke_p256_serialize_public_key(sk_r.public_key)
-    shared_secret = _hpke_extract_and_expand(p256_ecdh(sk_r, pk_e), kem_context)
-    return _hpke_key_schedule(0, aead_id, shared_secret, info, b"", b"")
+def hpke_setup_base_r(aead_id: int, enc: bytes, sk_r, info: bytes) -> HpkeContext:
+    """SetupBaseR (RFC 9180 5.1.1). sk_r is a P256PrivateKey or an X25519PrivateKey."""
+    kem_id = _hpke_kem_id_of(sk_r)
+    if kem_id == hpke_x25519_kem_id:
+        pk_e = hpke_x25519_deserialize_public_key(enc)
+    else:
+        pk_e = hpke_p256_deserialize_public_key(enc)
+    kem_context = enc + _hpke_serialize(sk_r.public_key)
+    shared_secret = _hpke_extract_and_expand(kem_id, _hpke_dh(sk_r, pk_e), kem_context)
+    return _hpke_key_schedule(kem_id, 0, aead_id, shared_secret, info, b"", b"")
 
 
 def _hpke_nonce(ctx: HpkeContext) -> bytes:
@@ -1192,7 +1273,7 @@ def hpke_open(
 def hpke_export(ctx: HpkeContext, exporter_context: bytes, length: int) -> bytes:
     """Context.Export (RFC 9180 5.3)."""
     return _hpke_labeled_expand(
-        _hpke_suite_id(ctx.aead_id),
+        _hpke_suite_id(ctx.kem_id, ctx.aead_id),
         ctx.exporter_secret,
         b"sec",
         exporter_context,

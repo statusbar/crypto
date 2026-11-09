@@ -69,7 +69,7 @@ Depends on `statusbar-core`. See the sections below for details.
 
 - `crypto` — single library exposing AES-128/256 (block, CBC, GCM, GCM-SIV, SIV, CMAC),
   SHA-256/512, POLYVAL, HKDF, KDF2, Curve25519 (X25519, Ed25519), NIST P-256
-  (ECDH, ECDSA), ECIES (X25519- and P-256-based), HPKE (RFC 9180), and PKCS#8
+  (ECDH, ECDSA), ECIES (X25519- and P-256-based), HPKE (RFC 9180, P-256 and X25519 KEMs), and PKCS#8
   key encoding.
 
 ## Building

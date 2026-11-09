@@ -8,9 +8,9 @@
 
 The IRTF CFRG publishes the full RFC 9180 vector grid at
 https://github.com/cfrg/draft-irtf-cfrg-hpke (test-vectors.json). This keeps
-the suites statusbar implements - DHKEM(P-256, HKDF-SHA256) 0x0010 with
-HKDF-SHA256 0x0001 and AES-128-GCM 0x0001 / AES-256-GCM 0x0002, all four
-modes - with the encryptions at the sequence numbers the RFC's Appendix A
+the suites statusbar implements - DHKEM(P-256, HKDF-SHA256) 0x0010 and
+DHKEM(X25519, HKDF-SHA256) 0x0020 with HKDF-SHA256 0x0001 and AES-128-GCM
+0x0001 / AES-256-GCM 0x0002, all four modes - with the encryptions at the sequence numbers the RFC's Appendix A
 itself prints (0, 1, 2, 4, 255, 256) and every export, as hex string
 literals for `statusbar/crypto/hpke/hpke_test.cpp`.
 
@@ -52,9 +52,11 @@ def main() -> int:
     kept = [
         v
         for v in vectors
-        if v["kem_id"] == 0x0010 and v["kdf_id"] == 0x0001 and v["aead_id"] in (1, 2)
+        if v["kem_id"] in (0x0010, 0x0020)
+        and v["kdf_id"] == 0x0001
+        and v["aead_id"] in (1, 2)
     ]
-    kept.sort(key=lambda v: (v["aead_id"], v["mode"]))
+    kept.sort(key=lambda v: (v["kem_id"], v["aead_id"], v["mode"]))
     print("// Copyright 2026 Jeff Koftinoff <jeff.koftinoff@statusbar.com>")
     print("// SPDX-License-Identifier: MIT")
     print("//")
@@ -62,9 +64,8 @@ def main() -> int:
     print(
         "// Source: IRTF CFRG RFC 9180 test-vectors.json (github.com/cfrg/draft-irtf-cfrg-hpke):"
     )
-    print(
-        "// DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM and AES-256-GCM, modes 0-3,"
-    )
+    print("// DHKEM(P-256, HKDF-SHA256) and DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 /")
+    print("// AES-128-GCM and AES-256-GCM, modes 0-3,")
     print(
         "// encryptions at seq 0, 1, 2, 4, 255, 256 and every export. Hex strings, as published."
     )

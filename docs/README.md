@@ -25,7 +25,7 @@ two-minute orientation, then dive into its headers under
 | 25519        | Curve25519 field/group ops, Ed25519 sign/verify, X25519 ECDH (RFC 7748 / 8032).     | [25519_MODULE.md](25519_MODULE.md)         |
 | p256         | NIST P-256 field/group ops, ECDH, and ECDSA sign/verify (FIPS 186-4, SEC 2).        | [P256_MODULE.md](P256_MODULE.md)           |
 | ecies        | DL/ECIES hybrid encryption over P-256 (IEEE 1363a-2004 §11.3, IEEE 1722-2016 §17).  | [ECIES_MODULE.md](ECIES_MODULE.md)         |
-| hpke         | HPKE: DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-GCM, four modes (RFC 9180).      | [HPKE_MODULE.md](HPKE_MODULE.md)           |
+| hpke         | HPKE: DHKEM(P-256 or X25519, HKDF-SHA256) / HKDF-SHA256 / AES-GCM, four modes (RFC 9180). | [HPKE_MODULE.md](HPKE_MODULE.md)           |
 | pkcs8        | PKCS#8 / SPKI DER import & export for Ed25519 and P-256 keys (RFC 5958 / 8410).     | [PKCS8_MODULE.md](PKCS8_MODULE.md)         |
 | util         | Secure-zero RAII containers, signing-key concepts, int128 detection, test helpers.  | [UTIL_MODULE.md](UTIL_MODULE.md)           |
 

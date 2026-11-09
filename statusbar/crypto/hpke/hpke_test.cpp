@@ -3,11 +3,13 @@
 
 // RFC 9180 HPKE against the CFRG test vectors (hpke_vectors.hpp): key derivation,
 // sender and recipient setup, encryptions at the RFC's sequence numbers and the
-// exports, for DHKEM(P-256, HKDF-SHA256) / HKDF-SHA256 / AES-128-GCM and
-// AES-256-GCM in all four modes; then the behaviour the vectors do not cover.
+// exports, for DHKEM(P-256, HKDF-SHA256) and DHKEM(X25519, HKDF-SHA256) with
+// HKDF-SHA256 and AES-128-GCM or AES-256-GCM in all four modes; then the
+// behaviour the vectors do not cover.
 
 #include "statusbar/crypto/hpke/hpke.hpp"
 
+#include "statusbar/crypto/25519/x25519.hpp"
 #include "statusbar/crypto/hpke/hpke_vectors.hpp"
 #include "statusbar/crypto/p256/p256_ecdsa.hpp"
 #include "statusbar/crypto/util/crypto_util_internal.hpp"
@@ -49,15 +51,39 @@ auto aead_of(Vector const& v) -> HpkeAead
     return static_cast<HpkeAead>(v.aead_id);
 }
 
-auto private_key(std::string_view skm_hex) -> P256PrivateKey
+// The two KEMs as the vectors see them: how a published private scalar and
+// public key are turned into the module's key types, and back.
+struct P256T
 {
-    return p256_keypair_from_scalar(fixed<hpke_p256_private_key_size>(skm_hex)).value();
-}
+    static constexpr uint16_t kem_id = 0x0010;
+    static constexpr size_t npk = hpke_p256_public_key_size;
+    static auto private_key(std::string_view skm_hex) -> P256PrivateKey
+    {
+        return p256_keypair_from_scalar(fixed<hpke_p256_private_key_size>(skm_hex)).value();
+    }
+    static auto public_key(std::string_view pkm_hex) -> P256PublicKey
+    {
+        return hpke_p256_deserialize_public_key(fixed<npk>(pkm_hex)).value();
+    }
+    static auto derive(std::span<uint8_t const> ikm) { return hpke_p256_derive_key_pair(ikm); }
+    static auto serialize(P256PublicKey const& pk) { return hpke_p256_serialize_public_key(pk); }
+};
 
-auto public_key(std::string_view pkm_hex) -> P256PublicKey
+struct X25519T
 {
-    return hpke_p256_deserialize_public_key(fixed<hpke_p256_public_key_size>(pkm_hex)).value();
-}
+    static constexpr uint16_t kem_id = 0x0020;
+    static constexpr size_t npk = hpke_x25519_public_key_size;
+    static auto private_key(std::string_view skm_hex) -> X25519PrivateKey
+    {
+        return x25519_keypair_from_seed(fixed<hpke_x25519_private_key_size>(skm_hex));
+    }
+    static auto public_key(std::string_view pkm_hex) -> X25519PublicKey
+    {
+        return hpke_x25519_deserialize_public_key(fixed<npk>(pkm_hex));
+    }
+    static auto derive(std::span<uint8_t const> ikm) { return hpke_x25519_derive_key_pair(ikm); }
+    static auto serialize(X25519PublicKey const& pk) { return hpke_x25519_serialize_public_key(pk); }
+};
 
 auto has_psk(Vector const& v) -> bool
 {
@@ -70,9 +96,10 @@ auto has_sender_key(Vector const& v) -> bool
 }
 
 // The vector's SetupXS with the public inputs read from it.
-auto setup_s(Vector const& v) -> std::optional<HpkeSenderSetup>
+template <class K>
+auto setup_s(Vector const& v) -> std::optional<HpkeSenderSetup<K::npk>>
 {
-    auto const pk_r = public_key(v.pkRm);
+    auto const pk_r = K::public_key(v.pkRm);
     auto const info = from_hex(v.info);
     auto const psk = from_hex(v.psk);
     auto const psk_id = from_hex(v.psk_id);
@@ -83,17 +110,18 @@ auto setup_s(Vector const& v) -> std::optional<HpkeSenderSetup>
         case 1:
             return hpke_setup_psk_s(aead_of(v), pk_r, info, psk, psk_id, ikm_e);
         case 2:
-            return hpke_setup_auth_s(aead_of(v), pk_r, info, private_key(v.skSm), ikm_e);
+            return hpke_setup_auth_s(aead_of(v), pk_r, info, K::private_key(v.skSm), ikm_e);
         default:
-            return hpke_setup_auth_psk_s(aead_of(v), pk_r, info, psk, psk_id, private_key(v.skSm), ikm_e);
+            return hpke_setup_auth_psk_s(aead_of(v), pk_r, info, psk, psk_id, K::private_key(v.skSm), ikm_e);
     }
 }
 
 // The vector's SetupXR with the enc it publishes.
+template <class K>
 auto setup_r(Vector const& v) -> std::optional<HpkeContext>
 {
-    auto const enc = fixed<hpke_p256_public_key_size>(v.enc);
-    auto const sk_r = private_key(v.skRm);
+    auto const enc = fixed<K::npk>(v.enc);
+    auto const sk_r = K::private_key(v.skRm);
     auto const info = from_hex(v.info);
     auto const psk = from_hex(v.psk);
     auto const psk_id = from_hex(v.psk_id);
@@ -103,37 +131,36 @@ auto setup_r(Vector const& v) -> std::optional<HpkeContext>
         case 1:
             return hpke_setup_psk_r(aead_of(v), enc, sk_r, info, psk, psk_id);
         case 2:
-            return hpke_setup_auth_r(aead_of(v), enc, sk_r, info, public_key(v.pkSm));
+            return hpke_setup_auth_r(aead_of(v), enc, sk_r, info, K::public_key(v.pkSm));
         default:
-            return hpke_setup_auth_psk_r(aead_of(v), enc, sk_r, info, psk, psk_id, public_key(v.pkSm));
+            return hpke_setup_auth_psk_r(aead_of(v), enc, sk_r, info, psk, psk_id, K::public_key(v.pkSm));
     }
 }
 
 auto context_matches(HpkeContext const& ctx, Vector const& v) -> bool
 {
     auto const key = from_hex(v.key);
-    bool ok = key.size() == hpke_aead_key_size(ctx.aead);
+    bool ok = key.size() == hpke_aead_key_size(ctx.aead) && static_cast<uint16_t>(ctx.kem) == v.kem_id;
     ok = ok && span_compare(std::span<uint8_t const>(ctx.key).first(key.size()), std::span<uint8_t const>(key));
     ok = ok && span_compare(std::span<uint8_t const>(ctx.base_nonce), std::span<uint8_t const>(from_hex(v.base_nonce)));
     return ok && span_compare(std::span<uint8_t const>(ctx.exporter_secret), std::span<uint8_t const>(from_hex(v.exporter_secret)));
 }
 
 // DeriveKeyPair(ikm) reproduces the vector's (skXm, pkXm).
+template <class K>
 auto key_pair_matches(std::string_view ikm_hex, std::string_view skm_hex, std::string_view pkm_hex) -> bool
 {
-    auto const kp = hpke_p256_derive_key_pair(from_hex(ikm_hex));
+    auto const kp = K::derive(from_hex(ikm_hex));
     bool ok = kp.has_value();
     ok = ok && span_compare(std::span<uint8_t const>(kp->data), std::span<uint8_t const>(from_hex(skm_hex)));
-    return ok &&
-        span_compare(
-               std::span<uint8_t const>(hpke_p256_serialize_public_key(kp->public_key)),
-               std::span<uint8_t const>(from_hex(pkm_hex)));
+    return ok && span_compare(std::span<uint8_t const>(K::serialize(kp->public_key)), std::span<uint8_t const>(from_hex(pkm_hex)));
 }
 
+template <class K>
 auto key_pairs_match(Vector const& v) -> bool
 {
-    bool ok = key_pair_matches(v.ikmE, v.skEm, v.pkEm) && key_pair_matches(v.ikmR, v.skRm, v.pkRm);
-    return ok && (!has_sender_key(v) || key_pair_matches(v.ikmS, v.skSm, v.pkSm));
+    bool ok = key_pair_matches<K>(v.ikmE, v.skEm, v.pkEm) && key_pair_matches<K>(v.ikmR, v.skRm, v.pkRm);
+    return ok && (!has_sender_key(v) || key_pair_matches<K>(v.ikmS, v.skSm, v.pkSm));
 }
 
 auto seal_and_open_match(HpkeContext& sender, HpkeContext& recipient, Encryption const& e) -> bool
@@ -151,10 +178,11 @@ auto seal_and_open_match(HpkeContext& sender, HpkeContext& recipient, Encryption
 }
 
 // Seal at e.seq reproduces e.ct (ciphertext || tag) and Open at e.seq recovers e.pt.
+template <class K>
 auto encryption_matches(Vector const& v, Encryption const& e) -> bool
 {
-    auto sender = setup_s(v);
-    auto recipient = setup_r(v);
+    auto sender = setup_s<K>(v);
+    auto recipient = setup_r<K>(v);
     if (!sender || !recipient) {
         return false;
     }
@@ -169,9 +197,49 @@ auto export_matches(HpkeContext const& ctx, Export const& x) -> bool
     return hpke_export(ctx, from_hex(x.exporter_context), out) && out == from_hex(x.exported_value);
 }
 
+// One vector's five checks for the KEM K; the TESTs below pick K by the vector's kem_id.
+template <class K>
+struct Check
+{
+    static auto derive(Vector const& v) -> bool { return key_pairs_match<K>(v); }
+    static auto sender(Vector const& v) -> bool
+    {
+        auto const s = setup_s<K>(v);
+        return s && span_compare(std::span<uint8_t const>(s->enc), std::span<uint8_t const>(from_hex(v.enc))) &&
+            context_matches(s->context, v);
+    }
+    static auto recipient(Vector const& v) -> bool
+    {
+        auto const r = setup_r<K>(v);
+        return r && context_matches(*r, v);
+    }
+    static auto encryptions(Vector const& v) -> bool
+    {
+        bool ok = true;
+        for (auto const& e : v.encryptions) {
+            ok = ok && encryption_matches<K>(v, e);
+        }
+        return ok;
+    }
+    static auto exports(Vector const& v) -> bool
+    {
+        auto const r = setup_r<K>(v);
+        bool ok = r.has_value();
+        for (auto const& x : v.exports) {
+            ok = ok && export_matches(*r, x);
+        }
+        return ok;
+    }
+};
+
+auto is_p256(Vector const& v) -> bool
+{
+    return v.kem_id == P256T::kem_id;
+}
+
 auto report(Vector const& v, std::string_view what) -> bool
 {
-    std::println("  RFC 9180 vector mode {} aead 0x{:04x}: {} disagrees", v.mode, v.aead_id, what);
+    std::println("  RFC 9180 vector kem 0x{:04x} mode {} aead 0x{:04x}: {} disagrees", v.kem_id, v.mode, v.aead_id, what);
     return false;
 }
 
@@ -194,47 +262,50 @@ constexpr std::array<uint8_t, 5> fixed_aad{'a', 'd', 'a', 't', 'a'};
 
 }  // namespace
 
+TEST(hpke, rfc9180_vector_grid_is_both_kems)
+{
+    size_t p256 = 0;
+    size_t x25519 = 0;
+    for (auto const& v : vectors) {
+        p256 += is_p256(v) ? 1 : 0;
+        x25519 += v.kem_id == X25519T::kem_id ? 1 : 0;
+    }
+    EXPECT_EQ(p256, size_t{8});
+    EXPECT_EQ(x25519, size_t{8});
+}
+
 TEST(hpke, rfc9180_derive_key_pair)
 {
     for (auto const& v : vectors) {
-        EXPECT_TRUE(key_pairs_match(v) || report(v, "DeriveKeyPair"));
+        EXPECT_TRUE((is_p256(v) ? Check<P256T>::derive(v) : Check<X25519T>::derive(v)) || report(v, "DeriveKeyPair"));
     }
 }
 
 TEST(hpke, rfc9180_setup_sender)
 {
     for (auto const& v : vectors) {
-        auto const s = setup_s(v);
-        bool const ok = s && span_compare(std::span<uint8_t const>(s->enc), std::span<uint8_t const>(from_hex(v.enc))) &&
-            context_matches(s->context, v);
-        EXPECT_TRUE(ok || report(v, "SetupS"));
+        EXPECT_TRUE((is_p256(v) ? Check<P256T>::sender(v) : Check<X25519T>::sender(v)) || report(v, "SetupS"));
     }
 }
 
 TEST(hpke, rfc9180_setup_recipient)
 {
     for (auto const& v : vectors) {
-        auto const r = setup_r(v);
-        EXPECT_TRUE((r && context_matches(*r, v)) || report(v, "SetupR"));
+        EXPECT_TRUE((is_p256(v) ? Check<P256T>::recipient(v) : Check<X25519T>::recipient(v)) || report(v, "SetupR"));
     }
 }
 
 TEST(hpke, rfc9180_encryptions)
 {
     for (auto const& v : vectors) {
-        for (auto const& e : v.encryptions) {
-            EXPECT_TRUE(encryption_matches(v, e) || report(v, "encryption"));
-        }
+        EXPECT_TRUE((is_p256(v) ? Check<P256T>::encryptions(v) : Check<X25519T>::encryptions(v)) || report(v, "encryption"));
     }
 }
 
 TEST(hpke, rfc9180_exports)
 {
     for (auto const& v : vectors) {
-        auto const r = setup_r(v);
-        for (auto const& x : v.exports) {
-            EXPECT_TRUE((r && export_matches(*r, x)) || report(v, "export"));
-        }
+        EXPECT_TRUE((is_p256(v) ? Check<P256T>::exports(v) : Check<X25519T>::exports(v)) || report(v, "export"));
     }
 }
 
@@ -300,6 +371,47 @@ TEST(hpke, malformed_enc_and_short_ikm_are_rejected)
     enc[64] ^= 0x01;  // y off the curve
     EXPECT_FALSE(hpke_setup_base_r(HpkeAead::aes128_gcm, enc, sk_r, {}).has_value());
     EXPECT_FALSE(hpke_p256_derive_key_pair(std::span<uint8_t const>(fixed_ikm_e).first(31)).has_value());
+    EXPECT_FALSE(hpke_x25519_derive_key_pair(std::span<uint8_t const>(fixed_ikm_e).first(31)).has_value());
+}
+
+TEST(hpke, x25519_round_trip_and_small_order_enc)
+{
+    auto const sk_r = hpke_x25519_derive_key_pair(fixed_psk).value();
+    auto sender = hpke_setup_base_s(HpkeAead::aes256_gcm, sk_r.public_key, fixed_aad, fixed_ikm_e);
+    auto recipient = hpke_setup_base_r(HpkeAead::aes256_gcm, sender->enc, sk_r, fixed_aad);
+    EXPECT_TRUE(sender.has_value() && recipient.has_value());
+    EXPECT_TRUE(sender->context.kem == HpkeKem::x25519 && recipient->kem == HpkeKem::x25519);
+    EXPECT_TRUE(span_compare(std::span<uint8_t const>(sender->enc), std::span<uint8_t const>(sender->context.key)) == false);
+
+    std::vector<uint8_t> buffer{0x10, 0x11, 0x12};
+    auto const tag = hpke_seal(sender->context, fixed_aad, buffer).value();
+    EXPECT_TRUE(hpke_open(*recipient, fixed_aad, buffer, tag));
+    EXPECT_TRUE((buffer == std::vector<uint8_t>{0x10, 0x11, 0x12}));
+
+    std::vector<uint8_t> from_sender(32);
+    std::vector<uint8_t> from_recipient(32);
+    EXPECT_TRUE(hpke_export(sender->context, fixed_aad, from_sender) && hpke_export(*recipient, fixed_aad, from_recipient));
+    EXPECT_TRUE(from_sender == from_recipient);
+
+    // RFC 7748 small-order u = 0: DH is all zeros, which 7.1.4 makes a setup failure.
+    std::array<uint8_t, hpke_x25519_public_key_size> const zero_enc{};
+    EXPECT_FALSE(hpke_setup_base_r(HpkeAead::aes256_gcm, zero_enc, sk_r, fixed_aad).has_value());
+    EXPECT_FALSE(
+        hpke_setup_base_s(HpkeAead::aes256_gcm, hpke_x25519_deserialize_public_key(zero_enc), {}, fixed_ikm_e).has_value());
+}
+
+TEST(hpke, the_two_kems_do_not_mix)
+{
+    // The same ikm derives different keys per KEM, and a context from one KEM
+    // exports differently from the other's: the suite id carries the KEM.
+    auto const p256 = hpke_p256_derive_key_pair(fixed_psk).value();
+    auto const x25519 = hpke_x25519_derive_key_pair(fixed_psk).value();
+    auto a = hpke_setup_base_s(HpkeAead::aes256_gcm, p256.public_key, {}, fixed_ikm_e);
+    auto b = hpke_setup_base_s(HpkeAead::aes256_gcm, x25519.public_key, {}, fixed_ikm_e);
+    EXPECT_TRUE(a->context.kem == HpkeKem::p256 && b->context.kem == HpkeKem::x25519);
+    EXPECT_FALSE(span_compare(std::span<uint8_t const>(a->context.key), std::span<uint8_t const>(b->context.key)));
+    EXPECT_EQ(hpke_kem_public_key_size(HpkeKem::p256), size_t{65});
+    EXPECT_EQ(hpke_kem_public_key_size(HpkeKem::x25519), size_t{32});
 }
 
 TEST(hpke, export_limits_and_long_info)
