@@ -530,6 +530,90 @@ class TestAesGcm(unittest.TestCase):
 
 
 # ===================================================================
+# 9c. HPKE (RFC 9180)
+# ===================================================================
+
+
+class TestHpke(unittest.TestCase):
+    """RFC 9180 CFRG vector: DHKEM(P-256, HKDF-SHA256), HKDF-SHA256, AES-256-GCM, base mode."""
+
+    IKME = bytes.fromhex(
+        "a90d3417c3da9cb6c6ae19b4b5dd6cc9529a4cc24efb7ae0ace1f31887a8cd6c"
+    )
+    SKEM = bytes.fromhex(
+        "90345e3a1d116c1dd39ae76d95ab858c142223a63e44f8f85318cfa91a84858e"
+    )
+    PKEM = bytes.fromhex(
+        "04c06b4f6bebc7bb495cb797ab753f911aff80aefb86fd8b6fcc35525f3ab5f03e"
+        "0b21bd31a86c6048af3cb2d98e0d3bf01da5cc4c39ff5370d331a4f1f7d5a4e0"
+    )
+    IKMR = bytes.fromhex(
+        "a0ce15d49e28bd47a18a97e147582d814b08cbe00109fed5ec27d1b4e9f6f5e3"
+    )
+    SKRM = bytes.fromhex(
+        "317f915db7bc629c48fe765587897e01e282d3e8445f79f27f65d031a88082b2"
+    )
+    PKRM = bytes.fromhex(
+        "04abc7e49a4c6b3566d77d0304addc6ed0e98512ffccf505e6a8e3eb25c685136f"
+        "853148544876de76c0f2ef99cdc3a05ccf5ded7860c7c021238f9e2073d2356c"
+    )
+    INFO = bytes.fromhex("4f6465206f6e2061204772656369616e2055726e")
+    KEY = bytes.fromhex(
+        "ee16802a936d5f544771131900ee6973d0551de9e852ece2ef34bf0d5f9e1d1d"
+    )
+    BASE_NONCE = bytes.fromhex("9bc50980832a7b4b58c40161")
+    EXPORTER_SECRET = bytes.fromhex(
+        "a8e9a7e62621879fdc89cea7da8e6153458f463e2851baaf009a7461d699cfb6"
+    )
+    ENC0_AAD = bytes.fromhex("436f756e742d30")
+    ENC0_PT = bytes.fromhex(
+        "4265617574792069732074727574682c20747275746820626561757479"
+    )
+    ENC0_CT = bytes.fromhex(
+        "58c61a45059d0c5704560e9d88b564a8b63f1364b8d1fcb3c4c6ddc1d291742465e902cd216f8908da49f8f96f"
+    )
+    EXPORT1_VALUE = bytes.fromhex(
+        "3ca0e7e10b601a32edd2f91c49bac766892c52bde2df01a6126320c6e6eb8af1"
+    )
+
+    def test_derive_key_pair(self):
+        kp = sc.hpke_p256_derive_key_pair(self.IKME)
+        self.assertEqual(kp.data, self.SKEM)
+        self.assertEqual(sc.hpke_p256_serialize_public_key(kp.public_key), self.PKEM)
+        self.assertEqual(sc.hpke_p256_derive_key_pair(self.IKMR).data, self.SKRM)
+
+    def test_setup_seal_open_export(self):
+        pk_r = sc.hpke_p256_deserialize_public_key(self.PKRM)
+        enc, sender = sc.hpke_setup_base_s(
+            sc.hpke_aead_aes256_gcm, pk_r, self.INFO, self.IKME
+        )
+        self.assertEqual(enc, self.PKEM)
+        self.assertEqual(
+            (sender.key, sender.base_nonce, sender.exporter_secret),
+            (self.KEY, self.BASE_NONCE, self.EXPORTER_SECRET),
+        )
+        sk_r = sc.p256_keypair_from_scalar(self.SKRM)
+        recipient = sc.hpke_setup_base_r(sc.hpke_aead_aes256_gcm, enc, sk_r, self.INFO)
+        self.assertEqual(recipient.key, self.KEY)
+        tag, ct = sc.hpke_seal(sender, self.ENC0_AAD, self.ENC0_PT)
+        self.assertEqual(ct + tag, self.ENC0_CT)
+        ok, pt = sc.hpke_open(recipient, self.ENC0_AAD, ct, tag)
+        self.assertEqual((ok, pt, recipient.seq), (True, self.ENC0_PT, 1))
+        self.assertEqual(sc.hpke_export(recipient, b"\x00", 32), self.EXPORT1_VALUE)
+
+    def test_open_rejects_tampering(self):
+        sk_r = sc.p256_keypair_from_scalar(self.SKRM)
+        recipient = sc.hpke_setup_base_r(
+            sc.hpke_aead_aes256_gcm, self.PKEM, sk_r, self.INFO
+        )
+        ct, tag = self.ENC0_CT[:-16], self.ENC0_CT[-16:]
+        ok, pt = sc.hpke_open(recipient, b"not the aad", ct, tag)
+        self.assertEqual((ok, pt, recipient.seq), (False, bytes(len(ct)), 0))
+        with self.assertRaises(ValueError):
+            sc.hpke_p256_deserialize_public_key(b"\x05" + self.PKEM[1:])
+
+
+# ===================================================================
 # 10. AES-GCM-SIV
 # ===================================================================
 

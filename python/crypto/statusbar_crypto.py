@@ -1001,6 +1001,205 @@ def p256_ecdh(sk: P256PrivateKey, peer_pk: P256PublicKey) -> bytes:
 
 #
 # DL/ECIES (IEEE 1363a-2004 / IEEE 1722-2016 clause 17)
+
+#
+# HPKE (RFC 9180): DHKEM(P-256, HKDF-SHA256) 0x0010 / HKDF-SHA256 0x0001 /
+# AES-128-GCM 0x0001 or AES-256-GCM 0x0002, base mode. Mirrors
+# statusbar/crypto/hpke/hpke.hpp on top of the cryptography package.
+#
+
+hpke_kem_id = 0x0010
+hpke_kdf_id = 0x0001
+hpke_aead_aes128_gcm = 0x0001
+hpke_aead_aes256_gcm = 0x0002
+hpke_p256_public_key_size = 65
+hpke_nonce_size = 12
+hpke_tag_size = 16
+hpke_hash_size = 32
+hpke_min_ikm_size = 32
+_HPKE_VERSION = b"HPKE-v1"
+_HPKE_KEM_SUITE_ID = b"KEM" + hpke_kem_id.to_bytes(2, "big")
+
+
+@dataclass
+class HpkeContext:
+    """One side's HPKE context (RFC 9180 5.1): key schedule output and sequence number."""
+
+    aead_id: int
+    key: bytes
+    base_nonce: bytes
+    exporter_secret: bytes
+    seq: int = 0
+
+
+def hpke_aead_key_size(aead_id: int) -> int:
+    return 16 if aead_id == hpke_aead_aes128_gcm else 32
+
+
+def _hpke_suite_id(aead_id: int) -> bytes:
+    return (
+        b"HPKE"
+        + hpke_kem_id.to_bytes(2, "big")
+        + hpke_kdf_id.to_bytes(2, "big")
+        + aead_id.to_bytes(2, "big")
+    )
+
+
+def _hpke_labeled_extract(
+    suite_id: bytes, salt: bytes, label: bytes, ikm: bytes
+) -> bytes:
+    """LabeledExtract (RFC 9180 4): HMAC-SHA-256(salt or 0^32, "HPKE-v1" || suite_id || label || ikm)."""
+    return _hmac_module.new(
+        salt or bytes(hpke_hash_size),
+        _HPKE_VERSION + suite_id + label + ikm,
+        hashlib.sha256,
+    ).digest()
+
+
+def _hpke_labeled_expand(
+    suite_id: bytes, prk: bytes, label: bytes, info: bytes, length: int
+) -> bytes:
+    """LabeledExpand (RFC 9180 4): HKDF-Expand(prk, I2OSP(L, 2) || "HPKE-v1" || suite_id || label || info, L)."""
+    return hkdf_sha256_expand(
+        prk, length.to_bytes(2, "big") + _HPKE_VERSION + suite_id + label + info, length
+    )
+
+
+def hpke_p256_derive_key_pair(ikm: bytes) -> P256PrivateKey:
+    """DeriveKeyPair for DHKEM(P-256, HKDF-SHA256) (RFC 9180 7.1.3)."""
+    if len(ikm) < hpke_min_ikm_size:
+        raise ValueError(f"HPKE ikm too short: {len(ikm)} < {hpke_min_ikm_size}")
+    dkp_prk = _hpke_labeled_extract(_HPKE_KEM_SUITE_ID, b"", b"dkp_prk", ikm)
+    for counter in range(256):
+        candidate = _hpke_labeled_expand(
+            _HPKE_KEM_SUITE_ID, dkp_prk, b"candidate", bytes([counter]), 32
+        )
+        key_pair = p256_keypair_from_scalar(
+            candidate
+        )  # None when sk == 0 or sk >= order
+        if key_pair is not None:
+            return key_pair
+    raise ValueError("HPKE DeriveKeyPair: no valid candidate")
+
+
+def hpke_p256_serialize_public_key(pk: P256PublicKey) -> bytes:
+    """SerializePublicKey (RFC 9180 7.1.1): SEC1 uncompressed 0x04 || x || y."""
+    return b"\x04" + pk.data
+
+
+def hpke_p256_deserialize_public_key(encoded: bytes) -> P256PublicKey:
+    """DeserializePublicKey: raises ValueError unless 0x04-prefixed and on the curve."""
+    from cryptography.hazmat.primitives.asymmetric.ec import (
+        SECP256R1,
+        EllipticCurvePublicNumbers,
+    )
+
+    if len(encoded) != hpke_p256_public_key_size or encoded[0] != 0x04:
+        raise ValueError("HPKE public key: not a 65-byte SEC1 uncompressed point")
+    x = int.from_bytes(encoded[1:33], "big")
+    y = int.from_bytes(encoded[33:], "big")
+    EllipticCurvePublicNumbers(
+        x, y, SECP256R1()
+    ).public_key()  # raises when off the curve
+    return P256PublicKey(data=encoded[1:])
+
+
+def _hpke_extract_and_expand(dh: bytes, kem_context: bytes) -> bytes:
+    eae_prk = _hpke_labeled_extract(_HPKE_KEM_SUITE_ID, b"", b"eae_prk", dh)
+    return _hpke_labeled_expand(
+        _HPKE_KEM_SUITE_ID, eae_prk, b"shared_secret", kem_context, hpke_hash_size
+    )
+
+
+def _hpke_key_schedule(
+    mode: int,
+    aead_id: int,
+    shared_secret: bytes,
+    info: bytes,
+    psk: bytes,
+    psk_id: bytes,
+) -> HpkeContext:
+    suite_id = _hpke_suite_id(aead_id)
+    psk_id_hash = _hpke_labeled_extract(suite_id, b"", b"psk_id_hash", psk_id)
+    info_hash = _hpke_labeled_extract(suite_id, b"", b"info_hash", info)
+    key_schedule_context = bytes([mode]) + psk_id_hash + info_hash
+    secret = _hpke_labeled_extract(suite_id, shared_secret, b"secret", psk)
+    return HpkeContext(
+        aead_id=aead_id,
+        key=_hpke_labeled_expand(
+            suite_id, secret, b"key", key_schedule_context, hpke_aead_key_size(aead_id)
+        ),
+        base_nonce=_hpke_labeled_expand(
+            suite_id, secret, b"base_nonce", key_schedule_context, hpke_nonce_size
+        ),
+        exporter_secret=_hpke_labeled_expand(
+            suite_id, secret, b"exp", key_schedule_context, hpke_hash_size
+        ),
+    )
+
+
+def hpke_setup_base_s(
+    aead_id: int, pk_r: P256PublicKey, info: bytes, ikm_e: bytes
+) -> tuple[bytes, HpkeContext]:
+    """SetupBaseS (RFC 9180 5.1.1) with the ephemeral key DeriveKeyPair(ikm_e). Returns (enc, context)."""
+    sk_e = hpke_p256_derive_key_pair(ikm_e)
+    enc = hpke_p256_serialize_public_key(sk_e.public_key)
+    kem_context = enc + hpke_p256_serialize_public_key(pk_r)
+    shared_secret = _hpke_extract_and_expand(p256_ecdh(sk_e, pk_r), kem_context)
+    return enc, _hpke_key_schedule(0, aead_id, shared_secret, info, b"", b"")
+
+
+def hpke_setup_base_r(
+    aead_id: int, enc: bytes, sk_r: P256PrivateKey, info: bytes
+) -> HpkeContext:
+    """SetupBaseR (RFC 9180 5.1.1)."""
+    pk_e = hpke_p256_deserialize_public_key(enc)
+    kem_context = enc + hpke_p256_serialize_public_key(sk_r.public_key)
+    shared_secret = _hpke_extract_and_expand(p256_ecdh(sk_r, pk_e), kem_context)
+    return _hpke_key_schedule(0, aead_id, shared_secret, info, b"", b"")
+
+
+def _hpke_nonce(ctx: HpkeContext) -> bytes:
+    return bytes(
+        a ^ b for a, b in zip(ctx.base_nonce, ctx.seq.to_bytes(hpke_nonce_size, "big"))
+    )
+
+
+def hpke_seal(ctx: HpkeContext, aad: bytes, plaintext: bytes) -> tuple[bytes, bytes]:
+    """ContextS.Seal (RFC 9180 5.2). Returns (tag, ciphertext) and advances seq."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    ct = AESGCM(ctx.key).encrypt(_hpke_nonce(ctx), plaintext, aad or None)
+    ctx.seq += 1
+    return ct[-hpke_tag_size:], ct[:-hpke_tag_size]
+
+
+def hpke_open(
+    ctx: HpkeContext, aad: bytes, ciphertext: bytes, tag: bytes
+) -> tuple[bool, bytes]:
+    """ContextR.Open (RFC 9180 5.2). Returns (ok, plaintext); seq advances only on success."""
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    try:
+        pt = AESGCM(ctx.key).decrypt(_hpke_nonce(ctx), ciphertext + tag, aad or None)
+    except InvalidTag:
+        return False, bytes(len(ciphertext))
+    ctx.seq += 1
+    return True, pt
+
+
+def hpke_export(ctx: HpkeContext, exporter_context: bytes, length: int) -> bytes:
+    """Context.Export (RFC 9180 5.3)."""
+    return _hpke_labeled_expand(
+        _hpke_suite_id(ctx.aead_id),
+        ctx.exporter_secret,
+        b"sec",
+        exporter_context,
+        length,
+    )
+
+
 #
 
 ecies_ephemeral_key_size = 33

@@ -21,6 +21,7 @@
 #include "statusbar/crypto/ecies/ecies.hpp"
 #include "statusbar/crypto/ecies/x25519_ecies.hpp"
 #include "statusbar/crypto/hkdf/hkdf.hpp"
+#include "statusbar/crypto/hpke/hpke.hpp"
 #include "statusbar/crypto/kdf2/kdf2.hpp"
 #include "statusbar/crypto/p256/p256.hpp"
 #include "statusbar/crypto/p256/p256_ecdh.hpp"

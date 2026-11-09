@@ -146,6 +146,7 @@ add_subdirectory(util)
 # included only where the 128-bit-integer implementations exist.
 if(STATUSBAR_HAS_INT128)
   add_subdirectory(ecies)
+  add_subdirectory(hpke)
   add_subdirectory(pkcs8)
 endif()
 

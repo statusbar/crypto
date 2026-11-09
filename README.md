@@ -1,6 +1,6 @@
 # statusbar-crypto
 
-Cryptography toolkit — AES (block, CBC, GCM, GCM-SIV, SIV, CMAC), SHA-2, POLYVAL, HKDF/KDF2, Curve25519 (X25519/Ed25519) and NIST P-256 (ECDH/ECDSA), ECIES, and PKCS#8. Hardware-accelerated where the CPU supports it (ARMv8 Crypto Extensions; AES-NI/PCLMUL/SHA-NI on x86-64), with portable software fallbacks for everything.
+Cryptography toolkit — AES (block, CBC, GCM, GCM-SIV, SIV, CMAC), SHA-2, POLYVAL, HKDF/KDF2, Curve25519 (X25519/Ed25519) and NIST P-256 (ECDH/ECDSA), ECIES, HPKE, and PKCS#8. Hardware-accelerated where the CPU supports it (ARMv8 Crypto Extensions; AES-NI/PCLMUL/SHA-NI on x86-64), with portable software fallbacks for everything.
 
 Status: pre-release.
 
@@ -26,7 +26,7 @@ Status: pre-release.
 primitives a modern secure-transport stack needs: the AES family (block, CBC,
 GCM, GCM-SIV, SIV, CMAC), SHA-2 and POLYVAL hashing, HKDF/KDF2 key derivation, and
 public-key cryptography over Curve25519 (X25519, Ed25519) and NIST P-256
-(ECDH, ECDSA), plus ECIES and PKCS#8 key encoding. It builds as a single
+(ECDH, ECDSA), plus ECIES, HPKE (RFC 9180) and PKCS#8 key encoding. It builds as a single
 module on top of `statusbar-core`.
 
 Performance and portability are first-class: hot paths use hardware
@@ -69,7 +69,8 @@ Depends on `statusbar-core`. See the sections below for details.
 
 - `crypto` — single library exposing AES-128/256 (block, CBC, GCM, GCM-SIV, SIV, CMAC),
   SHA-256/512, POLYVAL, HKDF, KDF2, Curve25519 (X25519, Ed25519), NIST P-256
-  (ECDH, ECDSA), ECIES (X25519- and P-256-based), and PKCS#8 key encoding.
+  (ECDH, ECDSA), ECIES (X25519- and P-256-based), HPKE (RFC 9180), and PKCS#8
+  key encoding.
 
 ## Building
 
