@@ -1046,10 +1046,10 @@ def gen_ecies():
     Z = eph_sk.exchange(ECDH(), recipient_sk.public_key())
     VZ = V + Z
 
-    # Per IEEE 1363a-2004: K2 (MAC key) = K[0:32], K1 (encryption key) = K[32:64]
+    # IEEE 1363a-2004 11.3.2 step 10a: K1 (encryption key) = K[0:32], K2 (MAC key) = K[32:64]
     kdf_out = kdf2_sha256(VZ, b"", 64)
-    mac_key = kdf_out[:32]  # K2
-    enc_key = kdf_out[32:]  # K1
+    enc_key = kdf_out[:32]  # K1
+    mac_key = kdf_out[32:]  # K2
 
     cipher = AES.new(enc_key, AES.MODE_CBC, iv=bytes(16))
     C = cipher.encrypt(pad(plaintext, 16))
@@ -1078,8 +1078,8 @@ def gen_ecies():
     VZ2 = V2 + Z2
 
     kdf_out2 = kdf2_sha256(VZ2, b"", 64)
-    mac_key2 = kdf_out2[:32]  # K2
-    enc_key2 = kdf_out2[32:]  # K1
+    enc_key2 = kdf_out2[:32]  # K1
+    mac_key2 = kdf_out2[32:]  # K2
 
     cipher2 = AES.new(enc_key2, AES.MODE_CBC, iv=bytes(16))
     C2 = cipher2.encrypt(pad(plaintext2, 16))
@@ -1101,7 +1101,7 @@ def gen_ecies():
 
 
 #
-# X25519 ECIES (IEEE 1722-2016 Clause 17, enc=1)
+# X25519 ECIES (statusbar extension; IEEE 1722-2025 Table 53 reserves enc 1-F)
 #
 
 
@@ -1134,8 +1134,8 @@ def gen_x25519_ecies():
         info = b"X25519-ECIES" + V
         kdf = HKDF(algorithm=SHA256(), length=64, salt=b"", info=info)
         K = kdf.derive(Z)
-        mac_key = K[:32]  # K2
-        enc_key = K[32:]  # K1
+        enc_key = K[:32]  # K1
+        mac_key = K[32:]  # K2
 
         # AES-256-CBC-IV0 encrypt with PKCS#7 padding
         cipher = AES.new(enc_key, AES.MODE_CBC, iv=bytes(16))
@@ -1180,7 +1180,7 @@ def gen_x25519_ecies():
 
     return {
         "algorithm": "x25519_ecies",
-        "standard": "IEEE 1722-2016 Clause 17",
+        "standard": "statusbar extension (HKDF-SHA-256 ECIES, not an IEEE 1722 enc value)",
         "vectors": vectors,
     }
 

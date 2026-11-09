@@ -36,7 +36,7 @@ auto x25519_ecies_encrypt(
     span<uint8_t const> plaintext,
     span<uint8_t> output,
     span<uint8_t const, X25519PrivateKey::LENGTH> entropy) -> span<uint8_t const>
-{
+{  // NOLINT(statusbar-block-statements) IEEE 1363a-2004 11.3 steps in the standard's order, read against the text
     size_t const needed = x25519_ecies_output_size(plaintext.size());
     if (output.size() < needed) {
         return {};
@@ -66,11 +66,12 @@ auto x25519_ecies_encrypt(
         return {};
     }
 
-    // Step 5: Split key — K2 = K[0..31] (MAC), K1 = K[32..63] (encryption)
+    // Step 5: Split key — K1 = K[0..31] (encryption), K2 = K[32..63] (MAC).
+    // Same order as the P-256 profile (IEEE 1363a-2004 11.3.2 step 10a).
     Aes256Key K1{};
-    span_copy(K1.data, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
+    span_copy(K1.data, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
     SecureArray<Aes256Key::LENGTH> K2{};
-    span_copy(K2, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
+    span_copy(K2, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
 
     // Step 6: Encrypt C = AES-256-CBC-IV0(K1, plaintext)
     size_t const c_len = aes_cbc_iv0_ciphertext_size(plaintext.size());
@@ -95,7 +96,7 @@ auto x25519_ecies_encrypt(
 //
 
 auto x25519_ecies_decrypt(X25519PrivateKey const& sk, span<uint8_t const> input, span<uint8_t> plaintext) -> span<uint8_t const>
-{
+{  // NOLINT(statusbar-block-statements) IEEE 1363a-2004 11.3 steps in the standard's order, read against the text
     // Minimum size: V(32) + C(16, one block minimum) + T(32) = 80 bytes
     if (input.size() < x25519_ecies_fixed_overhead + aes_block_size) {
         return {};
@@ -134,11 +135,12 @@ auto x25519_ecies_decrypt(X25519PrivateKey const& sk, span<uint8_t const> input,
         return {};
     }
 
-    // Step 5: Split key — K2 = K[0..31] (MAC), K1 = K[32..63] (encryption)
+    // Step 5: Split key — K1 = K[0..31] (encryption), K2 = K[32..63] (MAC).
+    // Same order as the P-256 profile (IEEE 1363a-2004 11.3.2 step 10a).
     Aes256Key K1{};
-    span_copy(K1.data, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
+    span_copy(K1.data, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
     SecureArray<Aes256Key::LENGTH> K2{};
-    span_copy(K2, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
+    span_copy(K2, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
 
     // Step 6: Verify T == HMAC-SHA-256(K2, C || L2)
     std::array<uint8_t, 8> const L2{};

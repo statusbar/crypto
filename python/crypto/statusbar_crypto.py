@@ -997,11 +997,12 @@ def ecies_encrypt(
     # DHAES mode: VZ = V || Z
     VZ = V + Z
 
-    # KDF2: derive K2 (32, MAC key) + K1 (32, encryption key) = 64 bytes
-    # Per IEEE 1363a-2004: MAC key is first, encryption key is second
+    # KDF2: derive K1 (32, encryption key) || K2 (32, MAC key) = 64 bytes.
+    # IEEE 1363a-2004 11.3.2 step 10a: K1 = leftmost k1 bits, K2 = the rest.
+    # (K2-first is only the stream-cipher method in DHAES mode, step 9a.)
     kdf_out = _kdf2_sha256(VZ, b"", 64)
-    mac_key = kdf_out[:32]  # K2
-    enc_key = kdf_out[32:]  # K1
+    enc_key = kdf_out[:32]  # K1
+    mac_key = kdf_out[32:]  # K2
 
     # AES-256-CBC-IV0 encrypt
     C = _aes256_cbc_iv0_encrypt(enc_key, plaintext)
@@ -1053,10 +1054,10 @@ def ecies_decrypt_with_ecdh(ecdh_fn: EcdhFn, data: bytes) -> bytes:
     # DHAES mode: VZ = V || Z
     VZ = V + Z
 
-    # KDF2: K2 (MAC key) = K[0:32], K1 (encryption key) = K[32:64]
+    # KDF2: K1 (encryption key) = K[0:32], K2 (MAC key) = K[32:64] (11.3.3 step 9a)
     kdf_out = _kdf2_sha256(VZ, b"", 64)
-    mac_key = kdf_out[:32]  # K2
-    enc_key = kdf_out[32:]  # K1
+    enc_key = kdf_out[:32]  # K1
+    mac_key = kdf_out[32:]  # K2
 
     # Verify MAC: HMAC(K2, C || I2OSP(0, 8))
     expected_T = _hmac.new(mac_key, C + b"\x00" * 8, hashlib.sha256).digest()
@@ -1080,7 +1081,7 @@ def ecies_decrypt(sk: P256PrivateKey, data: bytes) -> bytes:
 
 
 #
-# X25519 ECIES (IEEE 1722-2016 Clause 17, enc=1)
+# X25519 ECIES (statusbar extension; IEEE 1722-2025 Table 53 reserves enc 1-F)
 #
 
 x25519_ecies_ephemeral_key_size = 32
@@ -1098,7 +1099,7 @@ def x25519_ecies_output_size(plaintext_len: int) -> int:
 def x25519_ecies_encrypt(
     recipient_pk: X25519PublicKey, plaintext: bytes, entropy: bytes
 ) -> bytes:
-    """X25519 ECIES encrypt (IEEE 1722-2016 Clause 17, enc=1).
+    """X25519 ECIES encrypt (statusbar extension, not an IEEE 1722 enc value).
 
     Returns V || C || T where V is the ephemeral X25519 public key (32 bytes),
     C is the ciphertext (AES-256-CBC-IV0), T is the MAC (HMAC-SHA-256).
@@ -1119,8 +1120,8 @@ def x25519_ecies_encrypt(
     # HKDF-SHA-256: K = HKDF(salt="", ikm=Z, info="X25519-ECIES"||V, 64)
     info = b"X25519-ECIES" + V
     kdf_out = hkdf_sha256(b"", Z, info, 64)
-    mac_key = kdf_out[:32]  # K2
-    enc_key = kdf_out[32:]  # K1
+    enc_key = kdf_out[:32]  # K1
+    mac_key = kdf_out[32:]  # K2
 
     # AES-256-CBC-IV0 encrypt
     C = _aes256_cbc_iv0_encrypt(enc_key, plaintext)
@@ -1158,8 +1159,8 @@ def x25519_ecies_decrypt_with_ecdh(ecdh_fn: EcdhFn, data: bytes) -> bytes:
     # HKDF-SHA-256: K = HKDF(salt="", ikm=Z, info="X25519-ECIES"||V, 64)
     info = b"X25519-ECIES" + V
     kdf_out = hkdf_sha256(b"", Z, info, 64)
-    mac_key = kdf_out[:32]  # K2
-    enc_key = kdf_out[32:]  # K1
+    enc_key = kdf_out[:32]  # K1
+    mac_key = kdf_out[32:]  # K2
 
     # Verify MAC: HMAC(K2, C || I2OSP(0, 8))
     expected_T = _hmac.new(mac_key, C + b"\x00" * 8, hashlib.sha256).digest()
@@ -1171,7 +1172,7 @@ def x25519_ecies_decrypt_with_ecdh(ecdh_fn: EcdhFn, data: bytes) -> bytes:
 
 
 def x25519_ecies_decrypt(sk: X25519PrivateKey, data: bytes) -> bytes:
-    """X25519 ECIES decrypt (IEEE 1722-2016 Clause 17, enc=1). Software ECDH.
+    """X25519 ECIES decrypt (statusbar extension). Software ECDH.
 
     Expects V || C || T. Returns plaintext or raises on failure.
     """

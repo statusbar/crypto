@@ -800,6 +800,42 @@ class TestEcies(unittest.TestCase):
             sc.ecies_decrypt(recipient, bytes(tampered))
 
 
+class TestEciesKnownAnswer(unittest.TestCase):
+    """Vectors from python/crypto/gen_ecies_kats.py (independent `cryptography`
+    based reference of IEEE 1363a-2004 11.3.2). They pin the K1 || K2 key
+    order: K1 = leftmost 32 bytes is the AES key, K2 = the rest is the MAC key."""
+
+    SEED = bytes(range(1, 33))
+    ENTROPY = bytes.fromhex(
+        "deadbeefcafebabe0102030405060708090a0b0c0d0e0f101112131415161718"
+    )
+    P256_HELLO = bytes.fromhex(
+        "01c23f7a6a51aa50aecd3aaac1c65933cfaa9256eafd363ca2d345f9e53d95a5"
+        "9a2921cb336cc09952820b97fdca2ac7c6ba7425af011e3dc5a267e5d2686e9a"
+        "13a0447cd56edb42a5cec04ca4d4506ee7c1a28f62077c3ca956e35fc894ba21"
+        "87"
+    )
+    X25519_HELLO = bytes.fromhex(
+        "1113f6376e2ae22135bb91a634c2ee6ce2a545766cba69e25642022752782267"
+        "032fd2469ab2b89c476f15e93b3eee7bb3ae8e623c9d1c320a369228a2566a76"
+        "5b55a58e71c247f10e8ccc31580ebc26e22236b2ace9949e830ca96ac7bbebfe"
+    )
+
+    def test_p256_known_answer(self):
+        sk = sc.p256_ecdsa_keypair_from_seed(self.SEED)
+        ct = sc.ecies_encrypt(sk.public_key, b"Hello, DL/ECIES!", self.ENTROPY)
+        self.assertEqual(ct, self.P256_HELLO)
+        self.assertEqual(sc.ecies_decrypt(sk, self.P256_HELLO), b"Hello, DL/ECIES!")
+
+    def test_x25519_known_answer(self):
+        sk = sc.x25519_keypair_from_seed(self.SEED)
+        ct = sc.x25519_ecies_encrypt(sk.public_key, b"Hello, DL/ECIES!", self.ENTROPY)
+        self.assertEqual(ct, self.X25519_HELLO)
+        self.assertEqual(
+            sc.x25519_ecies_decrypt(sk, self.X25519_HELLO), b"Hello, DL/ECIES!"
+        )
+
+
 # ===================================================================
 # 18. KDF2
 # ===================================================================

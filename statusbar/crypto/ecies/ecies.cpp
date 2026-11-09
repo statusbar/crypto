@@ -32,7 +32,7 @@ auto ecies_encrypt(
     span<uint8_t const> plaintext,
     span<uint8_t> output,
     span<uint8_t const, p256_scalar_size> entropy) -> span<uint8_t const>
-{
+{  // NOLINT(statusbar-block-statements) IEEE 1363a-2004 11.3 steps in the standard's order, read against the text
     size_t const needed = ecies_output_size(plaintext.size());
     if (output.size() < needed) {
         return {};
@@ -73,13 +73,17 @@ auto ecies_encrypt(
         return {};
     }
 
-    // Step 6: Split key (DHAES mode):
-    //   K2 = K[0..31] (MAC key)
-    //   K1 = K[32..63] (encryption key)
+    // Step 6: Split key (IEEE 1363a-2004 11.3.2 step 10a):
+    //   K1 = leftmost k1 bits of K  -> AES-256 encryption key, K[0..31]
+    //   K2 = remaining k2 bits      -> HMAC-SHA-256 key,       K[32..63]
+    // The K2-first order exists only for the stream-cipher method in DHAES
+    // mode (step 9a, D.5.3 Note 1: a fixed-length MAC key ahead of a
+    // message-length cipher key); the KDF + symmetric-cipher method has no
+    // such exception.
     Aes256Key K1{};
-    span_copy(K1.data, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
+    span_copy(K1.data, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
     SecureArray<Aes256Key::LENGTH> K2{};
-    span_copy(K2, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
+    span_copy(K2, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
 
     // Step 7: Encrypt C = AES-256-CBC-IV0(K1, plaintext)
     size_t const c_len = aes_cbc_iv0_ciphertext_size(plaintext.size());
@@ -105,7 +109,7 @@ auto ecies_encrypt(
 //
 
 auto ecies_decrypt(P256PrivateKey const& sk, span<uint8_t const> input, span<uint8_t> plaintext) -> span<uint8_t const>
-{
+{  // NOLINT(statusbar-block-statements) IEEE 1363a-2004 11.3 steps in the standard's order, read against the text
     // Minimum size: V(33) + C(16, one block minimum) + T(32) = 81 bytes
     if (input.size() < ecies_fixed_overhead + aes_block_size) {
         return {};
@@ -157,7 +161,7 @@ auto ecies_decrypt(P256PrivateKey const& sk, span<uint8_t const> input, span<uin
         }
     }
 
-    // Step 4: VZ = V || Z, derive K, split into K2, K1
+    // Step 4: VZ = V || Z, derive K, split into K1 || K2 (IEEE 1363a-2004 11.3.3 step 9a)
     SecureArray<ecies_ephemeral_key_size + p256_field_element_size> VZ{};
     span_copy(span(VZ).first<ecies_ephemeral_key_size>(), V);
     span_copy(span(VZ).last<p256_field_element_size>(), z);
@@ -169,9 +173,9 @@ auto ecies_decrypt(P256PrivateKey const& sk, span<uint8_t const> input, span<uin
     }
 
     Aes256Key K1{};
-    span_copy(K1.data, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
+    span_copy(K1.data, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
     SecureArray<Aes256Key::LENGTH> K2{};
-    span_copy(K2, span<uint8_t const>(K).first<Aes256Key::LENGTH>());
+    span_copy(K2, span<uint8_t const>(K).last<Aes256Key::LENGTH>());
 
     // Step 5: Verify T == HMAC-SHA-256(K2, C || I2OSP(0, 8))
     std::array<uint8_t, 8> const L2{};

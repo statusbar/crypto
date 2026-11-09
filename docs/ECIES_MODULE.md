@@ -30,9 +30,45 @@ message from the ephemeral ECDH output. The MAC covers the
 ciphertext (encrypt-then-MAC). The P-256 profile follows IEEE
 1722-2016 clause 17.3.1 (`enc=0`) using DHAES mode (KDF input is
 `V || Z`) and EC2OSP-X point encoding (0x01 || x, 33 B). The X25519
-profile follows IEEE 1722-2016 (`enc=1`) with HKDF-SHA-256, a
-domain-separated `info` string (`"X25519-ECIES" || V`), and the
-native 32-byte X25519 public key as `V`.
+profile is a statusbar extension (IEEE 1722-2025 Table 53 reserves
+`enc` values 1–F) with HKDF-SHA-256, a domain-separated `info` string
+(`"X25519-ECIES" || V`), and the native 32-byte X25519 public key as
+`V`.
+
+### Key order
+
+Both profiles derive 64 bytes of key material and split it
+`K1 || K2`: **K1 = the leftmost 32 bytes is the AES-256 key, K2 = the
+remaining 32 bytes is the HMAC-SHA-256 key.** That is IEEE 1363a-2004
+11.3.2 step 10a / 11.3.3 step 9a, the KDF-plus-symmetric-cipher
+method ECC1 selects, and the order holds in DHAES and non-DHAES mode
+alike. 1363a's K2-first order exists only for the stream-cipher
+method in DHAES mode (step 9a), where K1 is as long as the message
+and putting the fixed-length MAC key first keeps its position
+independent of the message length (D.5.3 Note 1). With a
+fixed-length block-cipher key the order has no security effect, so
+interoperability decides, and the standard's order wins. Releases up
+to 2.4.1 had the two keys swapped; the known-answer tests in
+`ecies_test.cpp` / `x25519_ecies_test.cpp` pin the corrected order
+with vectors from an independent Python reference.
+
+### ECC1 parameter profile
+
+IEEE 1722-2025 17.3.1 names the 1363a options but leaves some
+parameters to the implementer. This library uses:
+
+| Parameter                     | Value                                    |
+|-------------------------------|------------------------------------------|
+| AES-CBC-IV0 key length (k1)   | 256 bits (1363a 14.3.2 allows 128/192/256)|
+| MAC1 key length (k2)          | 256 bits                                  |
+| KDF2 output                   | k1 + k2 = 512 bits                        |
+| Key derivation parameters P1  | empty                                     |
+| Encoding parameters P2        | empty, so L2 = I2OSP(0, 8)                |
+| V                             | EC2OSP-X, 33 octets                       |
+
+The library returns the 1363a triple order `V || C || T`; IEEE
+1722-2025 17.3.2 lays the EECF `encrypted_payload` out as `V`, `T`,
+`C`, and that reordering belongs to the AVTP framing layer, not here.
 
 Both `encrypt` calls take a caller-supplied 32-byte `entropy` span
 for the ephemeral keypair — the module never reads an RNG itself.
@@ -74,10 +110,10 @@ profiles above.
 
 ## Notes & caveats
 
-- **Pre-release, unaudited.** No third-party review. Wire-format
-  conformance to IEEE 1722-2016 §17.3.1 has been tested by the
-  in-tree test suite; full interop with other ECIES implementations
-  beyond that has not been validated.
+- **Pre-release, unaudited.** No third-party review. The P-256
+  profile is checked against an independent reference of IEEE
+  1363a-2004 11.3.2 (known-answer tests); no other IEEE 1722 ECC1
+  implementation is known to exist to interoperate with.
 - **Constant-time posture is bounded by the AES backend.** ECDH,
   KDF, and HMAC layers are constant-time. AES-256-CBC delegates to
   the [`aes`](AES_MODULE.md) module, which is constant-time **only**
@@ -116,5 +152,5 @@ profiles above.
 - [`aes_cbc`](AES_CBC_MODULE.md) — AES-256-CBC-IV0 bulk cipher used by both profiles.
 - [`aes_gcm_siv`](AES_GCM_SIV_MODULE.md) / [`aes_siv`](AES_SIV_MODULE.md) — alternative AEADs, **not** wired into the ECIES profiles here.
 - [`HARDWARE_ACCELERATION.md`](HARDWARE_ACCELERATION.md) — AES cache-timing posture per platform.
-- [IEEE 1722-2016 clause 17.3.1](https://standards.ieee.org/standard/1722-2016.html) — DL/ECIES profile (P-256 flavor).
+- [IEEE 1722-2025 clause 17.3](https://standards.ieee.org/standard/1722-2025.html) — EECF / ECC1 DL/ECIES profile (P-256 flavor).
 - [IEEE 1363a-2004 §11.3](https://standards.ieee.org/standard/1363a-2004.html) — DL/ECIES scheme.
