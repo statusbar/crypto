@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.31)
 project(
   statusbar-crypto
-  VERSION 2.5.2
+  VERSION 2.6.0
   LANGUAGES CXX)
 
 include(GNUInstallDirs)
