@@ -29,7 +29,6 @@ namespace statusbar::crypto {
 using internal::span_compare;
 using internal::span_copy;
 using internal::span_fill;
-using ::statusbar::crypto::p256_group_order_bytes;
 using std::span;
 
 //
@@ -45,6 +44,19 @@ auto p256_public_key(P256PrivateKey const& sk) -> P256PublicKey
 // Key generation
 //
 
+// Builds the key pair for a scalar already checked to lie in [1, n-1].
+static auto keypair_from_checked_scalar(span<uint8_t const, p256_scalar_size> scalar_bytes, P256Scalar32 const& d) -> P256PrivateKey
+{
+    // Compute Q = d * G
+    auto Q = p256x32_point_to_affine(p256x32_scalar_mult_base(d));
+    auto Q_bytes = p256x32_encode_point_uncompressed(Q);
+
+    P256PrivateKey sk{};
+    span_copy(sk.data, scalar_bytes);
+    span_copy(sk.public_key.data, Q_bytes);
+    return sk;
+}
+
 auto p256_keypair_from_scalar(span<uint8_t const, p256_scalar_size> scalar_bytes) -> std::optional<P256PrivateKey>
 {
     auto d = p256_sc32_from_bytes(scalar_bytes);
@@ -54,35 +66,12 @@ auto p256_keypair_from_scalar(span<uint8_t const, p256_scalar_size> scalar_bytes
         return std::nullopt;
     }
 
-    // Reject scalar >= n: constant-time comparison against the P-256 order.
-    // Scans all 32 bytes without early exit to avoid timing side-channels.
-    {
-        uint32_t gt = 0, lt = 0;
-        for (int i = 0; i < 32; ++i) {
-            uint32_t const a = scalar_bytes[static_cast<size_t>(i)];
-            uint32_t const b = p256_group_order_bytes[i];
-            uint32_t const decided = gt | lt;  // nonzero if already decided
-            uint32_t not_decided = 1 -
-                (decided | (decided >> 1) | (decided >> 2) | (decided >> 3) | (decided >> 4) | (decided >> 5) | (decided >> 6) |
-                 (decided >> 7));
-            not_decided &= 1;
-            gt |= ((b - a) >> 8) & not_decided;  // a > b at this position
-            lt |= ((a - b) >> 8) & not_decided;  // a < b at this position
-        }
-        if (lt == 0) {
-            return std::nullopt;  // scalar >= n
-        }
+    // Reject scalar >= n (constant time).
+    if (!p256_scalar_bytes_below_order(scalar_bytes)) {
+        return std::nullopt;
     }
 
-    // Compute Q = d * G
-    auto Q_jac = p256x32_scalar_mult_base(d);
-    auto Q = p256x32_point_to_affine(Q_jac);
-    auto Q_bytes = p256x32_encode_point_uncompressed(Q);
-
-    P256PrivateKey sk{};
-    span_copy(sk.data, scalar_bytes);
-    span_copy(sk.public_key.data, Q_bytes);
-    return sk;
+    return keypair_from_checked_scalar(scalar_bytes, d);
 }
 
 auto p256_ecdsa_keypair_from_seed(span<uint8_t const, 32> seed) -> P256PrivateKey
@@ -250,36 +239,50 @@ auto p256_ecdsa_sign(P256PrivateKey const& sk, span<uint8_t const> message) -> P
 // ECDSA Verify (ECVP-DSA)
 //
 
-auto p256_ecdsa_verify(P256PublicKey const& pk, span<uint8_t const> message, P256EcdsaSignature const& signature) -> bool
+// Step 1: r and s, accepted only when both lie in [1, n-1].
+static auto decode_signature_scalars(P256EcdsaSignature const& signature, P256Scalar32& r, P256Scalar32& s) -> bool
 {
-    // Step 1: Parse r, s from signature
-    std::array<uint8_t, p256_scalar_size> r_bytes{};
-    std::array<uint8_t, p256_scalar_size> s_bytes{};
-    span_copy(r_bytes, span<uint8_t const>(signature.data).first<p256_scalar_size>());
-    span_copy(s_bytes, span<uint8_t const>(signature.data).last<p256_scalar_size>());
+    auto const r_bytes = span<uint8_t const>(signature.data).first<p256_scalar_size>();
+    auto const s_bytes = span<uint8_t const>(signature.data).last<p256_scalar_size>();
 
-    auto r = p256_sc32_from_bytes(r_bytes);
-    auto s = p256_sc32_from_bytes(s_bytes);
-
-    // Check r, s in [1, n-1]
-    if (p256_sc32_is_zero(r) || p256_sc32_is_zero(s)) {
+    // Check r < n and s < n against the group order itself: from_bytes does not
+    // reduce, and a to-bytes round trip of an unreduced value never differs, so
+    // without this a congruent s + n would verify like s.
+    if (!p256_scalar_bytes_below_order(r_bytes) || !p256_scalar_bytes_below_order(s_bytes)) {
         return false;
     }
 
-    // Check r < n and s < n (from_bytes doesn't reduce, so check roundtrip)
-    {
-        auto r_check = p256_sc32_to_bytes(r);
-        auto s_check = p256_sc32_to_bytes(s);
-        if (!span_compare(r_bytes, r_check)) {
-            return false;
-        }
-        if (!span_compare(s_bytes, s_check)) {
-            return false;
-        }
+    r = p256_sc32_from_bytes(r_bytes);
+    s = p256_sc32_from_bytes(s_bytes);
+    return !p256_sc32_is_zero(r) && !p256_sc32_is_zero(s);
+}
+
+// Step 7: v = R.x mod n
+static auto x_coordinate_mod_n(P256FieldElement32 const& x) -> P256Scalar32
+{
+    std::array<uint8_t, 64> wide{};
+    span_copy(span(wide).last<p256_scalar_size>(), p256_fe32_to_bytes(x));
+    return p256_sc32_reduce_wide(wide);
+}
+
+// Steps 6 to 8: R = u1*G + u2*Q, accept iff R.x mod n == r.
+static auto point_x_matches_r(P256Scalar32 const& u1, P256Scalar32 const& u2, P256AffinePoint32 const& Q, P256Scalar32 const& r)
+    -> bool
+{
+    auto R_jac = p256x32_double_scalar_mult(u1, u2, Q);
+    if (p256x32_point_is_identity(R_jac)) {
+        return false;
     }
 
-    // Step 2: Hash the message
-    auto e_hash = sha256_hw(message);
+    auto v = x_coordinate_mod_n(p256x32_point_to_affine(R_jac).x);
+    return span_compare(p256_sc32_to_bytes(v), p256_sc32_to_bytes(r));
+}
+
+// Steps 2 to 8 for a decoded, on-curve public key.
+static auto verify_against_point(
+    P256AffinePoint32 const& Q, span<uint8_t const, p256_scalar_size> e_hash, P256Scalar32 const& r, P256Scalar32 const& s) -> bool
+{
+    // Step 2: e from the hash (EMSA1: leftmost 256 bits)
     auto e = p256_sc32_from_bytes(e_hash);
 
     // Step 3: w = s^(-1) mod n
@@ -289,37 +292,24 @@ auto p256_ecdsa_verify(P256PublicKey const& pk, span<uint8_t const> message, P25
     auto u1 = p256_sc32_mul(e, w);
     auto u2 = p256_sc32_mul(r, w);
 
+    return point_x_matches_r(u1, u2, Q, r);
+}
+
+auto p256_ecdsa_verify(P256PublicKey const& pk, span<uint8_t const> message, P256EcdsaSignature const& signature) -> bool
+{
+    // Step 1: Parse r, s from signature, both in [1, n-1]
+    P256Scalar32 r{}, s{};
+    if (!decode_signature_scalars(signature, r, s)) {
+        return false;
+    }
+
     // Step 5: Decode public key
     auto Q_opt = p256x32_decode_point_uncompressed(pk.data);
-    if (!Q_opt) {
-        return false;
-    }
-    auto const& Q = *Q_opt;
-    if (!p256x32_point_on_curve(Q)) {
+    if (!Q_opt || !p256x32_point_on_curve(*Q_opt)) {
         return false;
     }
 
-    // Step 6: R = u1*G + u2*Q (double scalar multiplication)
-    auto R_jac = p256x32_double_scalar_mult(u1, u2, Q);
-    if (p256x32_point_is_identity(R_jac)) {
-        return false;
-    }
-
-    auto R_aff = p256x32_point_to_affine(R_jac);
-
-    // Step 7: v = R.x mod n
-    auto v_bytes = p256_fe32_to_bytes(R_aff.x);
-    P256Scalar32 v{};
-    {
-        std::array<uint8_t, 2 * p256_scalar_size> wide{};
-        span_copy(span(wide).last<p256_scalar_size>(), v_bytes);
-        v = p256_sc32_reduce_wide(wide);
-    }
-
-    // Step 8: Accept iff v == r
-    auto v_out = p256_sc32_to_bytes(v);
-    auto r_out = p256_sc32_to_bytes(r);
-    return span_compare(v_out, r_out);
+    return verify_against_point(*Q_opt, sha256_hw(message), r, s);
 }
 
 }  // namespace statusbar::crypto

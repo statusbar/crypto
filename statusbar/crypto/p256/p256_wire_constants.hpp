@@ -9,7 +9,9 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 
 namespace statusbar::crypto {
 
@@ -48,5 +50,25 @@ inline constexpr uint8_t p256_generator_x_bytes[32] = {0x6B, 0x17, 0xD1, 0xF2, 0
 inline constexpr uint8_t p256_generator_y_bytes[32] = {0x4F, 0xE3, 0x42, 0xE2, 0xFE, 0x1A, 0x7F, 0x9B, 0x8E, 0xE7, 0xEB,
                                                        0x4A, 0x7C, 0x0F, 0x9E, 0x16, 0x2B, 0xCE, 0x33, 0x57, 0x6B, 0x31,
                                                        0x5E, 0xCE, 0xCB, 0xB6, 0x40, 0x68, 0x37, 0xBF, 0x51, 0xF5};
+
+/// @brief Constant-time test for a big-endian 32-byte value below the group order n.
+///
+/// Scans all 32 bytes without an early exit; the first differing byte decides.
+/// Used for every scalar range check (private scalars, signature r and s), since
+/// the scalar decoders do not reduce and a to-bytes round trip never fails.
+/// @return true when value < n.
+inline auto p256_scalar_bytes_below_order(std::span<uint8_t const, 32> value) -> bool
+{
+    uint32_t gt = 0;
+    uint32_t lt = 0;
+    for (size_t i = 0; i < 32; ++i) {
+        uint32_t const a = value[i];
+        uint32_t const b = p256_group_order_bytes[i];
+        uint32_t const undecided = 1U - (gt | lt);
+        gt |= ((b - a) >> 8) & undecided;
+        lt |= ((a - b) >> 8) & undecided;
+    }
+    return lt != 0;
+}
 
 }  // namespace statusbar::crypto

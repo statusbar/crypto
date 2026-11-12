@@ -418,4 +418,82 @@ TEST(p256_ecdsa, ecdsa_verify_corrupted_s)
     EXPECT_TRUE(!valid);
 }
 
+//
+// Verify rejects r or s outside [1, n-1] even when the value is congruent to a
+// valid signature component. The key below is constructed so that (G.x, 1) is a
+// valid signature on "sample": d = (1 - e) / G.x mod n. The forgery s' = 1 + n
+// is congruent to s and fits in 32 bytes, so an unreduced verifier accepts it.
+//
+
+namespace {
+
+constexpr uint8_t sample_s1_scalar[32] = {0x5A, 0xB7, 0xD7, 0x9E, 0x27, 0xE0, 0x58, 0xA7, 0x03, 0x1A, 0xA1,
+                                          0xA3, 0xCE, 0xA1, 0x93, 0xC7, 0xFE, 0xE5, 0x14, 0x64, 0xE4, 0x8A,
+                                          0xF7, 0x67, 0xC5, 0xA1, 0x1A, 0x55, 0x44, 0x2B, 0xB7, 0xBF};
+
+// P-256 group order n, big-endian.
+constexpr uint8_t group_order[32] = {0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF,
+                                     0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xBC, 0xE6, 0xFA, 0xAD, 0xA7, 0x17,
+                                     0x9E, 0x84, 0xF3, 0xB9, 0xCA, 0xC2, 0xFC, 0x63, 0x25, 0x51};
+
+// G.x, which is below n, so r = G.x mod n = G.x.
+constexpr uint8_t generator_x[32] = {0x6B, 0x17, 0xD1, 0xF2, 0xE1, 0x2C, 0x42, 0x47, 0xF8, 0xBC, 0xE6,
+                                     0xE5, 0x63, 0xA4, 0x40, 0xF2, 0x77, 0x03, 0x7D, 0x81, 0x2D, 0xEB,
+                                     0x33, 0xA0, 0xF4, 0xA1, 0x39, 0x45, 0xD8, 0x98, 0xC2, 0x96};
+
+// Signature (r = G.x, s = 1) on "sample" under sample_s1_scalar.
+auto sample_s1_signature() -> P256EcdsaSignature
+{
+    P256EcdsaSignature sig{};
+    for (size_t i = 0; i < 32; ++i) {
+        sig.data[i] = generator_x[i];
+    }
+    sig.data[63] = 0x01;
+    return sig;
+}
+
+auto verify_sample(P256PublicKey const& pk, P256EcdsaSignature const& sig) -> bool
+{
+    uint8_t message[] = "sample";
+    return p256_ecdsa_verify(pk, span<uint8_t const>(message, sizeof(message) - 1), sig);
+}
+
+}  // namespace
+
+TEST(p256_ecdsa, ecdsa_verify_rejects_s_congruent_but_above_order)
+{
+    auto sk = p256_keypair_from_scalar(sample_s1_scalar);
+    EXPECT_TRUE(sk.has_value());
+
+    auto const good = sample_s1_signature();
+    EXPECT_TRUE(verify_sample(sk->public_key, good));
+
+    // s' = s + n = n + 1: congruent to s, fits in 32 bytes, must be rejected.
+    P256EcdsaSignature s_plus_n = good;
+    for (size_t i = 0; i < 32; ++i) {
+        s_plus_n.data[32 + i] = group_order[i];
+    }
+    s_plus_n.data[63] = 0x52;
+    EXPECT_TRUE(!verify_sample(sk->public_key, s_plus_n));
+}
+
+TEST(p256_ecdsa, ecdsa_verify_rejects_r_or_s_equal_to_order)
+{
+    auto sk = p256_keypair_from_scalar(sample_s1_scalar);
+    EXPECT_TRUE(sk.has_value());
+    auto const good = sample_s1_signature();
+
+    P256EcdsaSignature s_is_n = good;
+    for (size_t i = 0; i < 32; ++i) {
+        s_is_n.data[32 + i] = group_order[i];
+    }
+    EXPECT_TRUE(!verify_sample(sk->public_key, s_is_n));
+
+    P256EcdsaSignature r_is_n = good;
+    for (size_t i = 0; i < 32; ++i) {
+        r_is_n.data[i] = group_order[i];
+    }
+    EXPECT_TRUE(!verify_sample(sk->public_key, r_is_n));
+}
+
 TEST_MAIN(statusbar_crypto_p256, p256_ecdsa_test)
